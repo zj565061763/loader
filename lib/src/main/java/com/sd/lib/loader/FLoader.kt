@@ -98,9 +98,10 @@ inline fun <T> DataState<T>.onFailure(action: DataState<T>.(exception: Throwable
 private class LoaderImpl<T>(initial: T) : FLoader<T>, FLoader.LoadScope<T> {
 
     private val _mutator = FMutator()
-
     private val _state: MutableStateFlow<DataState<T>> = MutableStateFlow(DataState(data = initial))
-    override val state: StateFlow<DataState<T>> = _state.asStateFlow()
+
+    override val state: StateFlow<DataState<T>>
+        get() = _state.asStateFlow()
 
     override val currentState: DataState<T>
         get() = this@LoaderImpl.state.value
