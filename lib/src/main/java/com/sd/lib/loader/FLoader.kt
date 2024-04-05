@@ -27,6 +27,11 @@ interface FLoader<T> {
      */
     suspend fun cancelLoad()
 
+    /**
+     * 设置数据
+     */
+    fun setData(data: T)
+
     interface LoadScope<T> {
         /** 当前数据状态 */
         val currentState: DataState<T>
@@ -132,5 +137,9 @@ private class LoaderImpl<T>(initial: T) : FLoader<T>, FLoader.LoadScope<T> {
 
     override suspend fun cancelLoad() {
         _mutator.mutate(999) { }
+    }
+
+    override fun setData(data: T) {
+        _state.update { it.copy(data = data) }
     }
 }
