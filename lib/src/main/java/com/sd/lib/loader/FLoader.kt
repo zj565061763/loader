@@ -1,15 +1,23 @@
 package com.sd.lib.loader
 
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
 import kotlin.coroutines.cancellation.CancellationException
 
 interface FLoader<T> {
 
     /** 状态 */
-    val state: StateFlow<DataState<T>>
+    val state: DataState<T>
+
+    /** 状态流 */
+    val stateFlow: Flow<DataState<T>>
+
+    /** 数据流 */
+    val dataFlow: Flow<T>
 
     /**
      * 加载数据，如果上一次加载还未完成，再次调用此方法，会取消上一次加载
@@ -100,11 +108,17 @@ private class LoaderImpl<T>(initial: T) : FLoader<T>, FLoader.LoadScope<T> {
     private val _mutator = FMutator()
     private val _state: MutableStateFlow<DataState<T>> = MutableStateFlow(DataState(data = initial))
 
-    override val state: StateFlow<DataState<T>>
+    override val state: DataState<T>
+        get() = _state.value
+
+    override val stateFlow: Flow<DataState<T>>
         get() = _state.asStateFlow()
 
+    override val dataFlow: Flow<T>
+        get() = _state.map { it.data }.distinctUntilChanged()
+
     override val currentState: DataState<T>
-        get() = this@LoaderImpl.state.value
+        get() = this@LoaderImpl.state
 
     override suspend fun load(
         notifyLoading: Boolean,

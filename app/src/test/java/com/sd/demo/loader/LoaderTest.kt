@@ -18,7 +18,7 @@ import org.junit.Test
 class LoaderTest {
     @Test
     fun `test default state`() {
-        FLoader(0).state.value.run {
+        FLoader(0).state.run {
             assertEquals(0, data)
             assertEquals(null, result)
             assertEquals(false, isLoading)
@@ -33,7 +33,7 @@ class LoaderTest {
             assertEquals(true, result.isSuccess)
             assertEquals(1, result.getOrThrow())
         }
-        loader.state.value.run {
+        loader.state.run {
             assertEquals(1, data)
             assertEquals(Result.success(Unit), result)
             assertEquals(false, isLoading)
@@ -48,7 +48,7 @@ class LoaderTest {
             assertEquals(true, result.isFailure)
             assertEquals("failure", result.exceptionOrNull()!!.message)
         }
-        loader.state.value.run {
+        loader.state.run {
             assertEquals(0, data)
             assertEquals(true, result!!.isFailure)
             assertEquals("failure", result!!.exceptionOrNull()!!.message)
@@ -69,14 +69,14 @@ class LoaderTest {
         }
 
         delay(1_000)
-        loader.state.value.run {
+        loader.state.run {
             assertEquals(0, data)
             assertEquals(null, result)
             assertEquals(true, isLoading)
         }
 
         loader.cancelLoad()
-        loader.state.value.run {
+        loader.state.run {
             assertEquals(0, data)
             assertEquals(null, result)
             assertEquals(false, isLoading)
@@ -95,7 +95,7 @@ class LoaderTest {
         }
 
         delay(1_000)
-        loader.state.value.run {
+        loader.state.run {
             assertEquals(0, data)
             assertEquals(null, result)
             assertEquals(true, isLoading)
@@ -105,7 +105,7 @@ class LoaderTest {
             assertEquals(true, result.isSuccess)
             assertEquals(2, result.getOrThrow())
         }
-        loader.state.value.run {
+        loader.state.run {
             assertEquals(2, data)
             assertEquals(Result.success(Unit), result)
             assertEquals(false, isLoading)
@@ -115,7 +115,7 @@ class LoaderTest {
     @Test
     fun `test notify loading`(): Unit = runBlocking {
         val loader = FLoader(0)
-        loader.state.value.run {
+        loader.state.run {
             assertEquals(false, isLoading)
         }
 
@@ -127,12 +127,12 @@ class LoaderTest {
         }
 
         delay(1_000)
-        loader.state.value.run {
+        loader.state.run {
             assertEquals(false, isLoading)
         }
 
         loader.load(notifyLoading = false) { error("failure") }
-        loader.state.value.run {
+        loader.state.run {
             assertEquals(false, isLoading)
         }
     }
@@ -141,7 +141,7 @@ class LoaderTest {
     fun `test load flow`(): Unit = runBlocking {
         val loader = FLoader(0)
 
-        loader.state.test {
+        loader.stateFlow.test {
             awaitItem().run {
                 assertEquals(0, data)
                 assertEquals(null, result)
