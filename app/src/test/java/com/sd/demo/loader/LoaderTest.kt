@@ -37,7 +37,7 @@ class LoaderTest {
             loader.load(
                 onFailure = { error("failure") },
             ) { error("load failure") }
-        } catch (e: Exception) {
+        } catch (e: Throwable) {
             assertEquals("failure", e.message)
         }
 
@@ -46,7 +46,7 @@ class LoaderTest {
             loader.load(
                 onFinish = { error("failure") },
             ) { 1 }
-        } catch (e: Exception) {
+        } catch (e: Throwable) {
             assertEquals("failure", e.message)
         }
     }
@@ -146,7 +146,7 @@ class LoaderTest {
                     },
                     onLoad = { list.add("onLoad") },
                 )
-            } catch (e: Exception) {
+            } catch (e: Throwable) {
                 assertEquals("failure", e.message)
                 assertEquals("onStart|onLoad|onFailure|onFinish", list.joinToString("|"))
             }
@@ -164,7 +164,7 @@ class LoaderTest {
                     onFailure = { list.add("onFailure") },
                     onLoad = { list.add("onLoad") },
                 )
-            } catch (e: Exception) {
+            } catch (e: Throwable) {
                 assertEquals("failure", e.message)
                 assertEquals("onStart|onLoad|onFinish", list.joinToString("|"))
             }
