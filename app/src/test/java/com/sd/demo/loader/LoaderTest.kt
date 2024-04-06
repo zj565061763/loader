@@ -88,7 +88,7 @@ class LoaderTest {
     }
 
     @Test
-    fun `test callback success`(): Unit = runBlocking {
+    fun `test callback load success`(): Unit = runBlocking {
         val loader = FLoader()
 
         val listCallback = mutableListOf<String>()
@@ -100,6 +100,22 @@ class LoaderTest {
             onLoad = { listCallback.add("onLoad") },
         ).let { result ->
             assertEquals("onStart|onLoad|onSuccess|onFinish", listCallback.joinToString("|"))
+        }
+    }
+
+    @Test
+    fun `test callback load failure`(): Unit = runBlocking {
+        val loader = FLoader()
+
+        val listCallback = mutableListOf<String>()
+        loader.load(
+            onStart = { listCallback.add("onStart") },
+            onFinish = { listCallback.add("onFinish") },
+            onSuccess = { listCallback.add("onSuccess") },
+            onFailure = { listCallback.add("onFailure") },
+            onLoad = { error("failure") },
+        ).let { result ->
+            assertEquals("onStart|onFailure|onFinish", listCallback.joinToString("|"))
         }
     }
 }
