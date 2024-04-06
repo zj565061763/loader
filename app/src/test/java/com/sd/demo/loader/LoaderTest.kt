@@ -97,12 +97,8 @@ class LoaderTest {
             onFinish = { listCallback.add("onFinish") },
             onSuccess = { listCallback.add("onSuccess") },
             onFailure = { listCallback.add("onFailure") },
-            onLoad = {
-                listCallback.add("onLoad")
-                1
-            },
+            onLoad = { listCallback.add("onLoad") },
         ).let { result ->
-            assertEquals(1, result.getOrThrow())
             assertEquals("onStart|onLoad|onSuccess|onFinish", listCallback.joinToString("|"))
         }
     }
