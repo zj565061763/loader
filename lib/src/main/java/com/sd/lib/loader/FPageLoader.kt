@@ -189,7 +189,6 @@ private class PageLoaderImpl<T>(
         notifyLoading: Boolean,
         onLoad: suspend FPageLoader.LoadScope<T>.(page: Int) -> List<T>,
     ): Result<List<T>> {
-        val page = refreshPage
         return _refreshLoader.load(
             onStart = {
                 // 刷新之前取消加载更多
@@ -204,10 +203,10 @@ private class PageLoaderImpl<T>(
                 }
             },
             onLoad = {
-                onLoad(page)
-            },
-            onSuccess = { data ->
-                handleLoadSuccess(page, data)
+                val page = refreshPage
+                onLoad(page).also { data ->
+                    handleLoadSuccess(page, data)
+                }
             },
             onFailure = { error ->
                 handleLoadFailure(error)
@@ -219,12 +218,10 @@ private class PageLoaderImpl<T>(
         notifyLoading: Boolean,
         onLoad: suspend FPageLoader.LoadScope<T>.(page: Int) -> List<T>,
     ): Result<List<T>> {
-        val isLoading = state.isRefreshing || state.isLoadingMore
-        if (isLoading) {
+        if (state.isRefreshing || state.isLoadingMore) {
             throw LoadMoreCancellationException()
         }
 
-        val page = loadMorePage
         return _loadMoreLoader.load(
             onStart = {
                 if (notifyLoading) {
@@ -237,10 +234,10 @@ private class PageLoaderImpl<T>(
                 }
             },
             onLoad = {
-                onLoad(page)
-            },
-            onSuccess = { data ->
-                handleLoadSuccess(page, data)
+                val page = loadMorePage
+                onLoad(page).also { data ->
+                    handleLoadSuccess(page, data)
+                }
             },
             onFailure = { error ->
                 handleLoadFailure(error)

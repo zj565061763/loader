@@ -130,14 +130,13 @@ private class DataLoaderImpl<T>(initial: T) : FDataLoader<T>, FDataLoader.LoadSc
                 }
             },
             onLoad = {
-                onLoad()
-            },
-            onSuccess = { data ->
-                _state.update {
-                    it.copy(
-                        data = data,
-                        result = Result.success(Unit),
-                    )
+                onLoad().also { data ->
+                    _state.update {
+                        it.copy(
+                            data = data,
+                            result = Result.success(Unit),
+                        )
+                    }
                 }
             },
             onFailure = { error ->
