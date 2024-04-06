@@ -198,4 +198,29 @@ class LoaderTest {
             }
         }
     }
+
+    @Test
+    fun `test callback load cancel`(): Unit = runBlocking {
+        val loader = FLoader()
+
+        val listCallback = mutableListOf<String>()
+        val job = launch {
+            loader.load(
+                onStart = { listCallback.add("onStart") },
+                onFinish = { listCallback.add("onFinish") },
+                onSuccess = { listCallback.add("onSuccess") },
+                onFailure = { listCallback.add("onFailure") },
+                onLoad = {
+                    listCallback.add("onLoad")
+                    delay(2_000)
+                    1
+                },
+            )
+        }
+
+        delay(1_000)
+        loader.cancelLoad()
+        assertEquals(true, job.isCancelled)
+        assertEquals("onStart|onLoad|onFinish", listCallback.joinToString("|"))
+    }
 }
