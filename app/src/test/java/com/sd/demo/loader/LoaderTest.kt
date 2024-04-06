@@ -93,18 +93,10 @@ class LoaderTest {
 
         val listCallback = mutableListOf<String>()
         loader.load(
-            onStart = {
-                listCallback.add("onStart")
-            },
-            onFinish = {
-                listCallback.add("onFinish")
-            },
-            onSuccess = {
-                listCallback.add("onSuccess")
-            },
-            onFailure = {
-                listCallback.add("onError")
-            },
+            onStart = { listCallback.add("onStart") },
+            onFinish = { listCallback.add("onFinish") },
+            onSuccess = { listCallback.add("onSuccess") },
+            onFailure = { listCallback.add("onFailure") },
             onLoad = {
                 listCallback.add("onLoad")
                 1
