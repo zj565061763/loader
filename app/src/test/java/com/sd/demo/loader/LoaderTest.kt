@@ -70,6 +70,24 @@ class LoaderTest {
     }
 
     @Test
+    fun `test load when loading`(): Unit = runBlocking {
+        val loader = FLoader()
+
+        val job = launch {
+            loader.load {
+                delay(2_000)
+                1
+            }
+        }
+
+        delay(1_000)
+        loader.load { 2 }.let { result ->
+            assertEquals(2, result.getOrThrow())
+            assertEquals(true, job.isCancelled)
+        }
+    }
+
+    @Test
     fun `test callback success`(): Unit = runBlocking {
         val loader = FLoader()
 
