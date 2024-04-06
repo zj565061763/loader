@@ -165,8 +165,8 @@ private class PageLoaderImpl<T>(
     private val dataHandler: suspend FPageLoader.LoadScope<T>.(page: Int, pageData: List<T>) -> List<T>?,
 ) : FPageLoader<T>, FPageLoader.LoadScope<T> {
 
-    private val _refreshMutator = FMutator()
-    private val _loadMoreMutator = FMutator()
+    private val _refreshLoader = FLoader()
+    private val _loadMoreLoader = FLoader()
 
     private var _currentPage = refreshPage - 1
 
@@ -184,26 +184,29 @@ private class PageLoaderImpl<T>(
         onLoad: suspend FPageLoader.LoadScope<T>.(page: Int) -> List<T>,
     ): Result<List<T>> {
         val page = refreshPage
-        return _refreshMutator.mutate {
-            // 刷新之前取消加载更多
-            cancelLoadMore()
-            try {
+        return _refreshLoader.load(
+            onStart = {
+                // 刷新之前取消加载更多
+                cancelLoadMore()
                 if (notifyLoading) {
                     _state.update { it.copy(isRefreshing = true) }
                 }
-                onLoad(page).let { data ->
-                    handleLoadSuccess(page, data)
-                    Result.success(data)
-                }
-            } catch (e: Throwable) {
-                handleLoadFailure(e)
-                Result.failure(e)
-            } finally {
+            },
+            onFinish = {
                 if (notifyLoading) {
                     _state.update { it.copy(isRefreshing = false) }
                 }
-            }
-        }
+            },
+            onLoad = {
+                onLoad(page)
+            },
+            onSuccess = { data ->
+                handleLoadSuccess(page, data)
+            },
+            onError = { error ->
+                handleLoadFailure(error)
+            },
+        )
     }
 
     override suspend fun loadMore(
@@ -216,42 +219,44 @@ private class PageLoaderImpl<T>(
         }
 
         val page = loadMorePage
-        return _loadMoreMutator.mutate {
-            try {
+        return _loadMoreLoader.load(
+            onStart = {
                 if (notifyLoading) {
                     _state.update { it.copy(isLoadingMore = true) }
                 }
-                onLoad(page).let { data ->
-                    handleLoadSuccess(page, data)
-                    Result.success(data)
-                }
-            } catch (e: Throwable) {
-                handleLoadFailure(e)
-                Result.failure(e)
-            } finally {
+            },
+            onFinish = {
                 if (notifyLoading) {
                     _state.update { it.copy(isLoadingMore = false) }
                 }
-            }
-        }
+            },
+            onLoad = {
+                onLoad(page)
+            },
+            onSuccess = { data ->
+                handleLoadSuccess(page, data)
+            },
+            onError = { error ->
+                handleLoadFailure(error)
+            },
+        )
     }
 
     override suspend fun cancelRefresh() {
-        _refreshMutator.mutate(999) { }
+        _refreshLoader.cancelLoad()
     }
 
     override suspend fun cancelLoadMore() {
-        _loadMoreMutator.mutate(999) { }
+        _loadMoreLoader.cancelLoad()
     }
 
     override fun setData(data: List<T>) {
-        _state.update { it.copy(data = data) }
+        _state.update {
+            it.copy(data = data)
+        }
     }
 
-    private suspend fun handleLoadSuccess(
-        page: Int,
-        data: List<T>,
-    ) {
+    private suspend fun handleLoadSuccess(page: Int, data: List<T>) {
         _currentPage = page
         _state.update {
             it.copy(
@@ -264,8 +269,9 @@ private class PageLoaderImpl<T>(
     }
 
     private fun handleLoadFailure(e: Throwable) {
-        if (e is CancellationException) throw e
-        _state.update { it.copy(result = Result.failure(e)) }
+        _state.update {
+            it.copy(result = Result.failure(e))
+        }
     }
 }
 

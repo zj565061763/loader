@@ -6,7 +6,6 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
-import kotlin.coroutines.cancellation.CancellationException
 
 interface FStateLoader<T> {
 
@@ -34,11 +33,6 @@ interface FStateLoader<T> {
      * 取消加载
      */
     suspend fun cancelLoad()
-
-    /**
-     * 设置数据
-     */
-    fun setData(data: T)
 
     interface LoadScope<T> {
         /** 当前数据状态 */
@@ -105,7 +99,7 @@ inline fun <T> DataState<T>.onFailure(action: DataState<T>.(exception: Throwable
 
 private class StateLoaderImpl<T>(initial: T) : FStateLoader<T>, FStateLoader.LoadScope<T> {
 
-    private val _mutator = FMutator()
+    private val _loader = FLoader()
     private val _state: MutableStateFlow<DataState<T>> = MutableStateFlow(DataState(data = initial))
 
     override val state: DataState<T>
@@ -124,37 +118,37 @@ private class StateLoaderImpl<T>(initial: T) : FStateLoader<T>, FStateLoader.Loa
         notifyLoading: Boolean,
         onLoad: suspend FStateLoader.LoadScope<T>.() -> T
     ): Result<T> {
-        return _mutator.mutate {
-            try {
+        return _loader.load(
+            onStart = {
                 if (notifyLoading) {
                     _state.update { it.copy(isLoading = true) }
                 }
-                onLoad().let { data ->
-                    _state.update {
-                        it.copy(
-                            data = data,
-                            result = Result.success(Unit),
-                        )
-                    }
-                    Result.success(data)
-                }
-            } catch (e: Throwable) {
-                if (e is CancellationException) throw e
-                _state.update { it.copy(result = Result.failure(e)) }
-                Result.failure(e)
-            } finally {
+            },
+            onFinish = {
                 if (notifyLoading) {
                     _state.update { it.copy(isLoading = false) }
                 }
-            }
-        }
+            },
+            onLoad = {
+                onLoad()
+            },
+            onSuccess = { data ->
+                _state.update {
+                    it.copy(
+                        data = data,
+                        result = Result.success(Unit),
+                    )
+                }
+            },
+            onError = { error ->
+                _state.update {
+                    it.copy(result = Result.failure(error))
+                }
+            },
+        )
     }
 
     override suspend fun cancelLoad() {
-        _mutator.mutate(999) { }
-    }
-
-    override fun setData(data: T) {
-        _state.update { it.copy(data = data) }
+        _loader.cancelLoad()
     }
 }
