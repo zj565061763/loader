@@ -17,7 +17,20 @@ class LoaderTest {
     @Test
     fun `test load failure`(): Unit = runBlocking {
         val loader = FLoader()
+
         loader.load { error("failure") }.let { result ->
+            assertEquals("failure", result.exceptionOrNull()!!.message)
+        }
+
+        loader.load(
+            onStart = { error("failure") },
+        ) { 1 }.let { result ->
+            assertEquals("failure", result.exceptionOrNull()!!.message)
+        }
+
+        loader.load(
+            onSuccess = { error("failure") },
+        ) { 1 }.let { result ->
             assertEquals("failure", result.exceptionOrNull()!!.message)
         }
     }
