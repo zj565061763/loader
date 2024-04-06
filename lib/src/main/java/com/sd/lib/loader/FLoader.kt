@@ -14,16 +14,16 @@ interface FLoader {
      * [onStart],[onLoad],[onSuccess]的异常会被捕获，除了[CancellationException]。
      *
      * @param onStart 加载开始回调
+     * @param onFinish 加载结束回调
      * @param onSuccess 加载成功回调
      * @param onError 加载失败回调
-     * @param onFinish 加载结束回调
      * @param onLoad 加载回调
      */
     suspend fun <T> load(
         onStart: suspend () -> Unit = {},
+        onFinish: () -> Unit = {},
         onSuccess: suspend (T) -> Unit = {},
         onError: (Throwable) -> Unit = {},
-        onFinish: () -> Unit = {},
         onLoad: suspend () -> T,
     ): Result<T>
 
@@ -46,9 +46,9 @@ private class LoaderImpl : FLoader {
 
     override suspend fun <T> load(
         onStart: suspend () -> Unit,
+        onFinish: () -> Unit,
         onSuccess: suspend (T) -> Unit,
         onError: (Throwable) -> Unit,
-        onFinish: () -> Unit,
         onLoad: suspend () -> T
     ): Result<T> {
         return _mutator.mutate {
