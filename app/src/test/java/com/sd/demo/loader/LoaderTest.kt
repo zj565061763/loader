@@ -20,22 +20,26 @@ class LoaderTest {
     fun `test load failure`(): Unit = runBlocking {
         val loader = FLoader()
 
+        // onLoad
         loader.load { error("failure") }.let { result ->
             assertEquals("failure", result.exceptionOrNull()!!.message)
         }
 
+        // onStart
         loader.load(
             onStart = { error("failure") },
         ) { 1 }.let { result ->
             assertEquals("failure", result.exceptionOrNull()!!.message)
         }
 
+        // onSuccess
         loader.load(
             onSuccess = { error("failure") },
         ) { 1 }.let { result ->
             assertEquals("failure", result.exceptionOrNull()!!.message)
         }
 
+        // onFailure
         try {
             loader.load(
                 onFailure = { error("failure") },
@@ -44,6 +48,7 @@ class LoaderTest {
             assertEquals("failure", e.message)
         }
 
+        // onFinish
         try {
             loader.load(
                 onFinish = { error("failure") },
@@ -90,16 +95,16 @@ class LoaderTest {
     @Test
     fun `test callback load success`(): Unit = runBlocking {
         val loader = FLoader()
-
-        val listCallback = mutableListOf<String>()
-        loader.load(
-            onStart = { listCallback.add("onStart") },
-            onFinish = { listCallback.add("onFinish") },
-            onSuccess = { listCallback.add("onSuccess") },
-            onFailure = { listCallback.add("onFailure") },
-            onLoad = { listCallback.add("onLoad") },
-        ).let { result ->
-            assertEquals("onStart|onLoad|onSuccess|onFinish", listCallback.joinToString("|"))
+        mutableListOf<String>().let { listCallback ->
+            loader.load(
+                onStart = { listCallback.add("onStart") },
+                onFinish = { listCallback.add("onFinish") },
+                onSuccess = { listCallback.add("onSuccess") },
+                onFailure = { listCallback.add("onFailure") },
+                onLoad = { listCallback.add("onLoad") },
+            ).let { result ->
+                assertEquals("onStart|onLoad|onSuccess|onFinish", listCallback.joinToString("|"))
+            }
         }
     }
 
@@ -107,15 +112,36 @@ class LoaderTest {
     fun `test callback load failure`(): Unit = runBlocking {
         val loader = FLoader()
 
-        val listCallback = mutableListOf<String>()
-        loader.load(
-            onStart = { listCallback.add("onStart") },
-            onFinish = { listCallback.add("onFinish") },
-            onSuccess = { listCallback.add("onSuccess") },
-            onFailure = { listCallback.add("onFailure") },
-            onLoad = { error("failure") },
-        ).let { result ->
-            assertEquals("onStart|onFailure|onFinish", listCallback.joinToString("|"))
+        // onLoad
+        mutableListOf<String>().let { listCallback ->
+            loader.load(
+                onStart = { listCallback.add("onStart") },
+                onFinish = { listCallback.add("onFinish") },
+                onSuccess = { listCallback.add("onSuccess") },
+                onFailure = { listCallback.add("onFailure") },
+                onLoad = {
+                    listCallback.add("onLoad")
+                    error("failure")
+                },
+            ).let { result ->
+                assertEquals("onStart|onLoad|onFailure|onFinish", listCallback.joinToString("|"))
+            }
+        }
+
+        // onStart
+        mutableListOf<String>().let { listCallback ->
+            loader.load(
+                onStart = {
+                    listCallback.add("onStart")
+                    error("failure")
+                },
+                onFinish = { listCallback.add("onFinish") },
+                onSuccess = { listCallback.add("onSuccess") },
+                onFailure = { listCallback.add("onFailure") },
+                onLoad = { listCallback.add("onLoad") },
+            ).let { result ->
+                assertEquals("onStart|onFailure|onFinish", listCallback.joinToString("|"))
+            }
         }
     }
 }
