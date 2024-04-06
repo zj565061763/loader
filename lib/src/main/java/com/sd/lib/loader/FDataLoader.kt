@@ -112,7 +112,7 @@ private class DataLoaderImpl<T>(initial: T) : FDataLoader<T>, FDataLoader.LoadSc
         get() = _state.map { it.data }.distinctUntilChanged()
 
     override val currentState: DataState<T>
-        get() = this@DataLoaderImpl.state
+        get() = _state.value
 
     override suspend fun load(
         notifyLoading: Boolean,
