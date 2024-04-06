@@ -91,28 +91,27 @@ class LoaderTest {
     fun `test callback success`(): Unit = runBlocking {
         val loader = FLoader()
 
-        var callbackString = ""
-
+        val listCallback = mutableListOf<String>()
         loader.load(
             onStart = {
-                callbackString += "onStart"
+                listCallback.add("onStart")
             },
             onFinish = {
-                callbackString += "onFinish"
+                listCallback.add("onFinish")
             },
             onSuccess = {
-                callbackString += "onSuccess"
+                listCallback.add("onSuccess")
             },
             onFailure = {
-                callbackString += "onError"
+                listCallback.add("onError")
             },
             onLoad = {
-                callbackString += "onLoad"
+                listCallback.add("onLoad")
                 1
             },
         ).let { result ->
             assertEquals(1, result.getOrThrow())
-            assertEquals("onStartonLoadonSuccessonFinish", callbackString)
+            assertEquals("onStart|onLoad|onSuccess|onFinish", listCallback.joinToString("|"))
         }
     }
 }
