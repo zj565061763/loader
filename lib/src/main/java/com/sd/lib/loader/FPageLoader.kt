@@ -1,7 +1,7 @@
 package com.sd.lib.loader
 
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlin.coroutines.cancellation.CancellationException
@@ -9,7 +9,10 @@ import kotlin.coroutines.cancellation.CancellationException
 interface FPageLoader<T> {
 
     /** 状态 */
-    val state: StateFlow<PageState<T>>
+    val state: PageState<T>
+
+    /** 状态流 */
+    val stateFlow: Flow<PageState<T>>
 
     /** 刷新数据的页码，例如数据源页码从1开始，那么[refreshPage]就为1 */
     val refreshPage: Int
@@ -174,10 +177,15 @@ private class PageLoaderImpl<T>(
         get() = if (currentState.data.isEmpty()) refreshPage else _currentPage + 1
 
     private val _state: MutableStateFlow<PageState<T>> = MutableStateFlow(PageState(data = initial))
-    override val state: StateFlow<PageState<T>> = _state.asStateFlow()
+
+    override val state: PageState<T>
+        get() = _state.value
+
+    override val stateFlow: Flow<PageState<T>>
+        get() = _state.asStateFlow()
 
     override val currentState: PageState<T>
-        get() = this@PageLoaderImpl.state.value
+        get() = _state.value
 
     override suspend fun refresh(
         notifyLoading: Boolean,

@@ -19,7 +19,7 @@ class PageLoaderTest {
     @Test
     fun `test default state`() {
         val loader = FPageLoader<Int> { page, pageData -> null }
-        loader.state.value.run {
+        loader.state.run {
             assertEquals(emptyList<Int>(), data)
             assertEquals(null, result)
             assertEquals(null, page)
@@ -45,7 +45,7 @@ class PageLoaderTest {
             assertEquals(true, result.isSuccess)
             assertEquals(listOf(1, 2), result.getOrThrow())
         }
-        loader.state.value.run {
+        loader.state.run {
             assertEquals(listOf(1, 2), data)
             assertEquals(Result.success(Unit), result)
             assertEquals(loader.refreshPage, page)
@@ -70,7 +70,7 @@ class PageLoaderTest {
             assertEquals(true, result.isFailure)
             assertEquals("failure", result.exceptionOrNull()!!.message)
         }
-        loader.state.value.run {
+        loader.state.run {
             assertEquals(emptyList<Int>(), data)
             assertEquals("failure", result!!.exceptionOrNull()!!.message)
             assertEquals(null, page)
@@ -99,7 +99,7 @@ class PageLoaderTest {
         }
 
         delay(1_000)
-        loader.state.value.run {
+        loader.state.run {
             assertEquals(emptyList<Int>(), data)
             assertEquals(null, result)
             assertEquals(null, page)
@@ -110,7 +110,7 @@ class PageLoaderTest {
         }
 
         loader.cancelRefresh()
-        loader.state.value.run {
+        loader.state.run {
             assertEquals(emptyList<Int>(), data)
             assertEquals(null, result)
             assertEquals(null, page)
@@ -139,7 +139,7 @@ class PageLoaderTest {
         }
 
         delay(1_000)
-        loader.state.value.run {
+        loader.state.run {
             assertEquals(emptyList<Int>(), data)
             assertEquals(null, result)
             assertEquals(null, page)
@@ -150,7 +150,7 @@ class PageLoaderTest {
         }
 
         loader.refresh { listOf(3, 4) }
-        loader.state.value.run {
+        loader.state.run {
             assertEquals(listOf(3, 4), data)
             assertEquals(Result.success(Unit), result)
             assertEquals(loader.refreshPage, page)
@@ -179,7 +179,7 @@ class PageLoaderTest {
         }
 
         delay(1_000)
-        loader.state.value.run {
+        loader.state.run {
             assertEquals(emptyList<Int>(), data)
             assertEquals(null, result)
             assertEquals(null, page)
@@ -190,7 +190,7 @@ class PageLoaderTest {
         }
 
         loader.refresh { listOf(3, 4) }
-        loader.state.value.run {
+        loader.state.run {
             assertEquals(listOf(3, 4), data)
             assertEquals(Result.success(Unit), result)
             assertEquals(loader.refreshPage, page)
@@ -204,7 +204,7 @@ class PageLoaderTest {
     @Test
     fun `test refresh notify loading`(): Unit = runBlocking {
         val loader = FPageLoader<Int> { page, pageData -> null }
-        loader.state.value.run {
+        loader.state.run {
             assertEquals(false, isRefreshing)
         }
 
@@ -216,12 +216,12 @@ class PageLoaderTest {
         }
 
         delay(1_000)
-        loader.state.value.run {
+        loader.state.run {
             assertEquals(false, isRefreshing)
         }
 
         loader.refresh(notifyLoading = false) { error("failure") }
-        loader.state.value.run {
+        loader.state.run {
             assertEquals(false, isRefreshing)
         }
     }
@@ -236,7 +236,7 @@ class PageLoaderTest {
             }
         }
 
-        loader.state.test {
+        loader.stateFlow.test {
             awaitItem().run {
                 assertEquals(emptyList<Int>(), data)
                 assertEquals(null, result)
@@ -290,7 +290,7 @@ class PageLoaderTest {
             assertEquals(true, result.isSuccess)
             assertEquals(listOf(1, 2), result.getOrThrow())
         }
-        loader.state.value.run {
+        loader.state.run {
             assertEquals(listOf(1, 2), data)
             assertEquals(Result.success(Unit), result)
             assertEquals(loader.refreshPage, page)
@@ -304,7 +304,7 @@ class PageLoaderTest {
             assertEquals(true, result.isSuccess)
             assertEquals(listOf(3, 4), result.getOrThrow())
         }
-        loader.state.value.run {
+        loader.state.run {
             assertEquals(listOf(1, 2, 3, 4), data)
             assertEquals(Result.success(Unit), result)
             assertEquals(loader.refreshPage + 1, page)
@@ -329,7 +329,7 @@ class PageLoaderTest {
             assertEquals(true, result.isFailure)
             assertEquals("failure", result.exceptionOrNull()!!.message)
         }
-        loader.state.value.run {
+        loader.state.run {
             assertEquals(emptyList<Int>(), data)
             assertEquals("failure", result!!.exceptionOrNull()!!.message)
             assertEquals(null, page)
@@ -358,7 +358,7 @@ class PageLoaderTest {
         }
 
         delay(1_000)
-        loader.state.value.run {
+        loader.state.run {
             assertEquals(emptyList<Int>(), data)
             assertEquals(null, result)
             assertEquals(null, page)
@@ -369,7 +369,7 @@ class PageLoaderTest {
         }
 
         loader.cancelLoadMore()
-        loader.state.value.run {
+        loader.state.run {
             assertEquals(emptyList<Int>(), data)
             assertEquals(null, result)
             assertEquals(null, page)
@@ -399,7 +399,7 @@ class PageLoaderTest {
 
         launch {
             delay(1_000)
-            loader.state.value.run {
+            loader.state.run {
                 assertEquals(emptyList<Int>(), data)
                 assertEquals(null, result)
                 assertEquals(null, page)
@@ -415,7 +415,7 @@ class PageLoaderTest {
         }
 
         loadJob.join()
-        loader.state.value.run {
+        loader.state.run {
             assertEquals(listOf(1, 2), data)
             assertEquals(Result.success(Unit), result)
             assertEquals(loader.refreshPage, page)
@@ -445,7 +445,7 @@ class PageLoaderTest {
 
         launch {
             delay(1_000)
-            loader.state.value.run {
+            loader.state.run {
                 assertEquals(emptyList<Int>(), data)
                 assertEquals(null, result)
                 assertEquals(null, page)
@@ -461,7 +461,7 @@ class PageLoaderTest {
         }
 
         loadJob.join()
-        loader.state.value.run {
+        loader.state.run {
             assertEquals(listOf(1, 2), data)
             assertEquals(Result.success(Unit), result)
             assertEquals(loader.refreshPage, page)
@@ -475,7 +475,7 @@ class PageLoaderTest {
     @Test
     fun `test loadMore notify loading`(): Unit = runBlocking {
         val loader = FPageLoader<Int> { page, pageData -> null }
-        loader.state.value.run {
+        loader.state.run {
             assertEquals(false, isLoadingMore)
         }
 
@@ -487,12 +487,12 @@ class PageLoaderTest {
         }
 
         delay(1_000)
-        loader.state.value.run {
+        loader.state.run {
             assertEquals(false, isLoadingMore)
         }
 
         loader.loadMore(notifyLoading = false) { error("failure") }
-        loader.state.value.run {
+        loader.state.run {
             assertEquals(false, isLoadingMore)
         }
     }
@@ -507,7 +507,7 @@ class PageLoaderTest {
             }
         }
 
-        loader.state.test {
+        loader.stateFlow.test {
             awaitItem().run {
                 assertEquals(emptyList<Int>(), data)
                 assertEquals(null, result)
