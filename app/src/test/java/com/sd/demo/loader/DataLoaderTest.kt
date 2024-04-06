@@ -2,7 +2,7 @@ package com.sd.demo.loader
 
 import app.cash.turbine.test
 import com.sd.lib.loader.DataState
-import com.sd.lib.loader.FStateLoader
+import com.sd.lib.loader.FDataLoader
 import com.sd.lib.loader.isFailure
 import com.sd.lib.loader.isInitial
 import com.sd.lib.loader.isSuccess
@@ -15,10 +15,10 @@ import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
-class StateLoaderTest {
+class DataLoaderTest {
     @Test
     fun `test default state`() {
-        FStateLoader(0).state.run {
+        FDataLoader(0).state.run {
             assertEquals(0, data)
             assertEquals(null, result)
             assertEquals(false, isLoading)
@@ -28,7 +28,7 @@ class StateLoaderTest {
 
     @Test
     fun `test load success`(): Unit = runBlocking {
-        val loader = FStateLoader(0)
+        val loader = FDataLoader(0)
         loader.load { 1 }.let { result ->
             assertEquals(true, result.isSuccess)
             assertEquals(1, result.getOrThrow())
@@ -43,7 +43,7 @@ class StateLoaderTest {
 
     @Test
     fun `test load failure`(): Unit = runBlocking {
-        val loader = FStateLoader(0)
+        val loader = FDataLoader(0)
         loader.load { error("failure") }.let { result ->
             assertEquals(true, result.isFailure)
             assertEquals("failure", result.exceptionOrNull()!!.message)
@@ -59,7 +59,7 @@ class StateLoaderTest {
 
     @Test
     fun `test load cancel`(): Unit = runBlocking {
-        val loader = FStateLoader(0)
+        val loader = FDataLoader(0)
 
         launch {
             loader.load {
@@ -85,7 +85,7 @@ class StateLoaderTest {
 
     @Test
     fun `test load when loading`(): Unit = runBlocking {
-        val loader = FStateLoader(0)
+        val loader = FDataLoader(0)
 
         launch {
             loader.load {
@@ -114,7 +114,7 @@ class StateLoaderTest {
 
     @Test
     fun `test notify loading`(): Unit = runBlocking {
-        val loader = FStateLoader(0)
+        val loader = FDataLoader(0)
         loader.state.run {
             assertEquals(false, isLoading)
         }
@@ -139,7 +139,7 @@ class StateLoaderTest {
 
     @Test
     fun `test load flow`(): Unit = runBlocking {
-        val loader = FStateLoader(0)
+        val loader = FDataLoader(0)
 
         loader.stateFlow.test {
             awaitItem().run {
