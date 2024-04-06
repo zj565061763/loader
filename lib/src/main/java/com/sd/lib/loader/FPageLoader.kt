@@ -174,7 +174,7 @@ private class PageLoaderImpl<T>(
 
     private var _currentPage = refreshPage - 1
     private val loadMorePage: Int
-        get() = if (currentState.data.isEmpty()) refreshPage else _currentPage + 1
+        get() = if (state.data.isEmpty()) refreshPage else _currentPage + 1
 
     override val state: PageState<T>
         get() = _state.value
@@ -219,7 +219,7 @@ private class PageLoaderImpl<T>(
         notifyLoading: Boolean,
         onLoad: suspend FPageLoader.LoadScope<T>.(page: Int) -> List<T>,
     ): Result<List<T>> {
-        val isLoading = currentState.run { isRefreshing || isLoadingMore }
+        val isLoading = state.isRefreshing || state.isLoadingMore
         if (isLoading) {
             throw LoadMoreCancellationException()
         }
