@@ -11,7 +11,7 @@ interface FLoader {
     /**
      * 开始加载，如果上一次加载还未完成，再次调用此方法，会取消上一次加载。
      * 如果[onStart]触发了，则[onFinish]一定会触发，
-     * [onStart],[onLoad],[onSuccess]的异常会被捕获，除了[CancellationException]。
+     * [onStart],[onLoad],[onSuccess]的异常会被捕获，除了[CancellationException]，捕获之后会通知[onFailure]。
      *
      * @param onStart 开始回调
      * @param onFinish 结束回调
