@@ -13,17 +13,17 @@ interface FLoader {
      * 如果[onStart]触发了，则[onFinish]一定会触发，
      * [onStart],[onLoad],[onSuccess]的异常会被捕获，除了[CancellationException]。
      *
-     * @param onStart 加载开始回调
-     * @param onFinish 加载结束回调
-     * @param onSuccess 加载成功回调
-     * @param onError 加载失败回调
+     * @param onStart 开始回调
+     * @param onFinish 结束回调
+     * @param onSuccess 成功回调
+     * @param onFailure 失败回调
      * @param onLoad 加载回调
      */
     suspend fun <T> load(
         onStart: suspend () -> Unit = {},
         onFinish: () -> Unit = {},
         onSuccess: suspend (T) -> Unit = {},
-        onError: (Throwable) -> Unit = {},
+        onFailure: (Throwable) -> Unit = {},
         onLoad: suspend () -> T,
     ): Result<T>
 
@@ -48,7 +48,7 @@ private class LoaderImpl : FLoader {
         onStart: suspend () -> Unit,
         onFinish: () -> Unit,
         onSuccess: suspend (T) -> Unit,
-        onError: (Throwable) -> Unit,
+        onFailure: (Throwable) -> Unit,
         onLoad: suspend () -> T
     ): Result<T> {
         return _mutator.mutate {
@@ -60,7 +60,7 @@ private class LoaderImpl : FLoader {
                 }
             } catch (e: Throwable) {
                 if (e is CancellationException) throw e
-                onError(e)
+                onFailure(e)
                 Result.failure(e)
             } finally {
                 onFinish()

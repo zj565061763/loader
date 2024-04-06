@@ -203,7 +203,7 @@ private class PageLoaderImpl<T>(
             onSuccess = { data ->
                 handleLoadSuccess(page, data)
             },
-            onError = { error ->
+            onFailure = { error ->
                 handleLoadFailure(error)
             },
         )
@@ -236,7 +236,7 @@ private class PageLoaderImpl<T>(
             onSuccess = { data ->
                 handleLoadSuccess(page, data)
             },
-            onError = { error ->
+            onFailure = { error ->
                 handleLoadFailure(error)
             },
         )

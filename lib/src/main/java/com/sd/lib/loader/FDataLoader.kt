@@ -140,7 +140,7 @@ private class DataLoaderImpl<T>(initial: T) : FDataLoader<T>, FDataLoader.LoadSc
                     )
                 }
             },
-            onError = { error ->
+            onFailure = { error ->
                 _state.update {
                     it.copy(result = Result.failure(error))
                 }
