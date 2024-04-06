@@ -95,15 +95,15 @@ class LoaderTest {
     @Test
     fun `test callback load success`(): Unit = runBlocking {
         val loader = FLoader()
-        mutableListOf<String>().let { listCallback ->
+        mutableListOf<String>().let { list ->
             loader.load(
-                onStart = { listCallback.add("onStart") },
-                onFinish = { listCallback.add("onFinish") },
-                onSuccess = { listCallback.add("onSuccess") },
-                onFailure = { listCallback.add("onFailure") },
-                onLoad = { listCallback.add("onLoad") },
+                onStart = { list.add("onStart") },
+                onFinish = { list.add("onFinish") },
+                onSuccess = { list.add("onSuccess") },
+                onFailure = { list.add("onFailure") },
+                onLoad = { list.add("onLoad") },
             ).let { result ->
-                assertEquals("onStart|onLoad|onSuccess|onFinish", listCallback.joinToString("|"))
+                assertEquals("onStart|onLoad|onSuccess|onFinish", list.joinToString("|"))
             }
         }
     }
@@ -113,88 +113,88 @@ class LoaderTest {
         val loader = FLoader()
 
         // onLoad
-        mutableListOf<String>().let { listCallback ->
+        mutableListOf<String>().let { list ->
             loader.load(
-                onStart = { listCallback.add("onStart") },
-                onFinish = { listCallback.add("onFinish") },
-                onSuccess = { listCallback.add("onSuccess") },
-                onFailure = { listCallback.add("onFailure") },
+                onStart = { list.add("onStart") },
+                onFinish = { list.add("onFinish") },
+                onSuccess = { list.add("onSuccess") },
+                onFailure = { list.add("onFailure") },
                 onLoad = {
-                    listCallback.add("onLoad")
+                    list.add("onLoad")
                     error("failure")
                 },
             ).let { result ->
-                assertEquals("onStart|onLoad|onFailure|onFinish", listCallback.joinToString("|"))
+                assertEquals("onStart|onLoad|onFailure|onFinish", list.joinToString("|"))
             }
         }
 
         // onStart
-        mutableListOf<String>().let { listCallback ->
+        mutableListOf<String>().let { list ->
             loader.load(
                 onStart = {
-                    listCallback.add("onStart")
+                    list.add("onStart")
                     error("failure")
                 },
-                onFinish = { listCallback.add("onFinish") },
-                onSuccess = { listCallback.add("onSuccess") },
-                onFailure = { listCallback.add("onFailure") },
-                onLoad = { listCallback.add("onLoad") },
+                onFinish = { list.add("onFinish") },
+                onSuccess = { list.add("onSuccess") },
+                onFailure = { list.add("onFailure") },
+                onLoad = { list.add("onLoad") },
             ).let { result ->
-                assertEquals("onStart|onFailure|onFinish", listCallback.joinToString("|"))
+                assertEquals("onStart|onFailure|onFinish", list.joinToString("|"))
             }
         }
 
         // onSuccess
-        mutableListOf<String>().let { listCallback ->
+        mutableListOf<String>().let { list ->
             loader.load(
-                onStart = { listCallback.add("onStart") },
-                onFinish = { listCallback.add("onFinish") },
+                onStart = { list.add("onStart") },
+                onFinish = { list.add("onFinish") },
                 onSuccess = {
-                    listCallback.add("onSuccess")
+                    list.add("onSuccess")
                     error("failure")
                 },
-                onFailure = { listCallback.add("onFailure") },
-                onLoad = { listCallback.add("onLoad") },
+                onFailure = { list.add("onFailure") },
+                onLoad = { list.add("onLoad") },
             ).let { result ->
-                assertEquals("onStart|onLoad|onSuccess|onFailure|onFinish", listCallback.joinToString("|"))
+                assertEquals("onStart|onLoad|onSuccess|onFailure|onFinish", list.joinToString("|"))
             }
         }
 
         // onFailure
-        mutableListOf<String>().let { listCallback ->
+        mutableListOf<String>().let { list ->
             try {
                 loader.load(
-                    onStart = { listCallback.add("onStart") },
-                    onFinish = { listCallback.add("onFinish") },
-                    onSuccess = { listCallback.add("onSuccess") },
+                    onStart = { list.add("onStart") },
+                    onFinish = { list.add("onFinish") },
+                    onSuccess = { list.add("onSuccess") },
                     onFailure = {
-                        listCallback.add("onFailure")
+                        list.add("onFailure")
                         error("failure")
                     },
-                    onLoad = { listCallback.add("onLoad") },
+                    onLoad = { list.add("onLoad") },
                 )
             } catch (e: Exception) {
                 assertEquals("failure", e.message)
-                assertEquals("onStart|onLoad|onSuccess|onFailure|onFinish", listCallback.joinToString("|"))
+                assertEquals("onStart|onLoad|onSuccess|onFailure|onFinish", list.joinToString("|"))
             }
         }
 
         // onFinish
-        mutableListOf<String>().let { listCallback ->
+        mutableListOf<String>().let { list ->
             try {
                 loader.load(
-                    onStart = { listCallback.add("onStart") },
+                    onStart = { list.add("onStart") },
                     onFinish = {
-                        listCallback.add("onFinish")
+                        list.add("onFinish")
                         error("failure")
                     },
-                    onSuccess = { listCallback.add("onSuccess") },
-                    onFailure = { listCallback.add("onFailure") },
-                    onLoad = { listCallback.add("onLoad") },
+                    onSuccess = { list.add("onSuccess") },
+                    onFailure = { list.add("onFailure") },
+                    onLoad = { list.add("onLoad") },
                 )
             } catch (e: Exception) {
                 assertEquals("failure", e.message)
-                assertEquals("onStart|onLoad|onSuccess|onFinish", listCallback.joinToString("|"))
+                assertEquals("onStart|onLoad|onSuccess|onFinish", list.joinToString("|"))
             }
         }
     }
