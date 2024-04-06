@@ -170,13 +170,11 @@ private class PageLoaderImpl<T>(
 
     private val _refreshLoader = FLoader()
     private val _loadMoreLoader = FLoader()
+    private val _state: MutableStateFlow<PageState<T>> = MutableStateFlow(PageState(data = initial))
 
     private var _currentPage = refreshPage - 1
-
     private val loadMorePage: Int
         get() = if (currentState.data.isEmpty()) refreshPage else _currentPage + 1
-
-    private val _state: MutableStateFlow<PageState<T>> = MutableStateFlow(PageState(data = initial))
 
     override val state: PageState<T>
         get() = _state.value
