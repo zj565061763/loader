@@ -223,4 +223,40 @@ class LoaderTest {
         assertEquals(true, job.isCancelled)
         assertEquals("onStart|onLoad|onFinish", listCallback.joinToString("|"))
     }
+
+    @Test
+    fun `test callback load when loading`(): Unit = runBlocking {
+        val loader = FLoader()
+
+        val listCallback = mutableListOf<String>()
+        val job = launch {
+            loader.load(
+                onStart = { listCallback.add("onStart") },
+                onFinish = { listCallback.add("onFinish") },
+                onSuccess = { listCallback.add("onSuccess") },
+                onFailure = { listCallback.add("onFailure") },
+                onLoad = {
+                    listCallback.add("onLoad")
+                    delay(2_000)
+                    1
+                },
+            )
+        }
+
+        delay(1_000)
+        mutableListOf<String>().let { list ->
+            loader.load(
+                onStart = { list.add("onStart") },
+                onFinish = { list.add("onFinish") },
+                onSuccess = { list.add("onSuccess") },
+                onFailure = { list.add("onFailure") },
+                onLoad = { list.add("onLoad") },
+            ).let { result ->
+                assertEquals("onStart|onLoad|onSuccess|onFinish", list.joinToString("|"))
+            }
+        }
+
+        assertEquals(true, job.isCancelled)
+        assertEquals("onStart|onLoad|onFinish", listCallback.joinToString("|"))
+    }
 }
