@@ -178,5 +178,24 @@ class LoaderTest {
                 assertEquals("onStart|onLoad|onSuccess|onFailure|onFinish", listCallback.joinToString("|"))
             }
         }
+
+        // onFinish
+        mutableListOf<String>().let { listCallback ->
+            try {
+                loader.load(
+                    onStart = { listCallback.add("onStart") },
+                    onFinish = {
+                        listCallback.add("onFinish")
+                        error("failure")
+                    },
+                    onSuccess = { listCallback.add("onSuccess") },
+                    onFailure = { listCallback.add("onFailure") },
+                    onLoad = { listCallback.add("onLoad") },
+                )
+            } catch (e: Exception) {
+                assertEquals("failure", e.message)
+                assertEquals("onStart|onLoad|onSuccess|onFinish", listCallback.joinToString("|"))
+            }
+        }
     }
 }
