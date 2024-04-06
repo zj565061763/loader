@@ -8,7 +8,7 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
 import kotlin.coroutines.cancellation.CancellationException
 
-interface FLoader<T> {
+interface FStateLoader<T> {
 
     /** 状态 */
     val state: DataState<T>
@@ -47,12 +47,12 @@ interface FLoader<T> {
 }
 
 /**
- * [FLoader]
+ * [FStateLoader]
  *
  * @param initial 初始值
  */
-fun <T> FLoader(initial: T): FLoader<T> {
-    return LoaderImpl(initial = initial)
+fun <T> FStateLoader(initial: T): FStateLoader<T> {
+    return StateLoaderImpl(initial = initial)
 }
 
 //-------------------- state --------------------
@@ -103,7 +103,7 @@ inline fun <T> DataState<T>.onFailure(action: DataState<T>.(exception: Throwable
 
 //-------------------- impl --------------------
 
-private class LoaderImpl<T>(initial: T) : FLoader<T>, FLoader.LoadScope<T> {
+private class StateLoaderImpl<T>(initial: T) : FStateLoader<T>, FStateLoader.LoadScope<T> {
 
     private val _mutator = FMutator()
     private val _state: MutableStateFlow<DataState<T>> = MutableStateFlow(DataState(data = initial))
@@ -118,11 +118,11 @@ private class LoaderImpl<T>(initial: T) : FLoader<T>, FLoader.LoadScope<T> {
         get() = _state.map { it.data }.distinctUntilChanged()
 
     override val currentState: DataState<T>
-        get() = this@LoaderImpl.state
+        get() = this@StateLoaderImpl.state
 
     override suspend fun load(
         notifyLoading: Boolean,
-        onLoad: suspend FLoader.LoadScope<T>.() -> T
+        onLoad: suspend FStateLoader.LoadScope<T>.() -> T
     ): Result<T> {
         return _mutator.mutate {
             try {
