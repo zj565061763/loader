@@ -168,11 +168,14 @@ private class PageLoaderImpl<T>(
             onLoad = {
                 val page = refreshPage
                 onLoad(page).also { data ->
+                    _currentPage = page
                     handleLoadSuccess(page, data)
                 }
             },
             onFailure = { error ->
-                handleLoadFailure(error)
+                _state.update {
+                    it.copy(result = Result.failure(error))
+                }
             },
         )
     }
@@ -199,11 +202,14 @@ private class PageLoaderImpl<T>(
             onLoad = {
                 val page = loadMorePage
                 onLoad(page).also { data ->
+                    if (data.isNotEmpty()) _currentPage = page
                     handleLoadSuccess(page, data)
                 }
             },
             onFailure = { error ->
-                handleLoadFailure(error)
+                _state.update {
+                    it.copy(result = Result.failure(error))
+                }
             },
         )
     }
@@ -223,20 +229,14 @@ private class PageLoaderImpl<T>(
     }
 
     private suspend fun handleLoadSuccess(page: Int, data: List<T>) {
-        _currentPage = page
+        val totalData = dataHandler(page, data)
         _state.update {
             it.copy(
-                data = dataHandler(page, data) ?: it.data,
+                data = totalData ?: it.data,
                 result = Result.success(Unit),
                 page = page,
                 pageSize = data.size,
             )
-        }
-    }
-
-    private fun handleLoadFailure(e: Throwable) {
-        _state.update {
-            it.copy(result = Result.failure(e))
         }
     }
 }
