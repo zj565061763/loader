@@ -67,7 +67,7 @@ interface FPageLoader<T> {
  * [FPageLoader]
  *
  * @param initial 初始值
- * @param refreshPage 刷新数据的页码，例如数据源规定页码从1开始，那么此参数就为1
+ * @param refreshPage 刷新数据的页码，例如数据源页码从1开始，那么[refreshPage]就为1
  * @param dataHandler 处理每页的数据，并返回总的数据，返回null则总数据不变化
  */
 fun <T> FPageLoader(
