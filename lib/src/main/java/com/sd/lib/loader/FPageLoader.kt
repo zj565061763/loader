@@ -227,7 +227,7 @@ private class PageLoaderImpl<T>(
     }
 
     private suspend fun handleLoadSuccess(page: Int, data: List<T>) {
-        // dataHandler可能会抛异常，放在最开始执行
+        // dataHandler可能会抛异常，放在最开始执行，发生异常后不执行下面的代码
         val totalData = dataHandler(page, data)
 
         if (page == refreshPage) {
