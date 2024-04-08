@@ -35,7 +35,7 @@ interface FDataLoader<T> {
     suspend fun cancelLoad()
 
     interface LoadScope<T> {
-        /** 当前数据状态 */
+        /** 当前状态 */
         val currentState: DataState<T>
     }
 }
