@@ -154,7 +154,7 @@ private class PageLoaderImpl<T>(
     ): Result<List<T>> {
         return _refreshLoader.load(
             onStart = {
-                // 刷新之前取消加载更多
+                // 取消加载更多
                 cancelLoadMore()
                 if (notifyLoading) {
                     _state.update { it.copy(isRefreshing = true) }
