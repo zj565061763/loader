@@ -96,7 +96,7 @@ class LoaderTest {
                 onFinish = { list.add("onFinish") },
                 onFailure = { list.add("onFailure") },
                 onLoad = { list.add("onLoad") },
-            ).let { result ->
+            ).let {
                 assertEquals("onStart|onLoad|onFinish", list.joinToString("|"))
             }
         }
@@ -111,12 +111,15 @@ class LoaderTest {
             loader.load(
                 onStart = { list.add("onStart") },
                 onFinish = { list.add("onFinish") },
-                onFailure = { list.add("onFailure") },
+                onFailure = {
+                    list.add("onFailure")
+                    assertEquals("failure", it.message)
+                },
                 onLoad = {
                     list.add("onLoad")
                     error("failure")
                 },
-            ).let { result ->
+            ).let {
                 assertEquals("onStart|onLoad|onFailure|onFinish", list.joinToString("|"))
             }
         }
@@ -129,7 +132,10 @@ class LoaderTest {
                     error("failure")
                 },
                 onFinish = { list.add("onFinish") },
-                onFailure = { list.add("onFailure") },
+                onFailure = {
+                    list.add("onFailure")
+                    assertEquals("failure", it.message)
+                },
                 onLoad = { list.add("onLoad") },
             ).let { result ->
                 assertEquals("onStart|onFailure|onFinish", list.joinToString("|"))
