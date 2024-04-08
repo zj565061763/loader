@@ -116,49 +116,11 @@ val PageState<*>.isFailure: Boolean get() = result?.isFailure == true
 /** 是否显示没有更多数据 */
 val PageState<*>.showNoMoreData: Boolean get() = data.isNotEmpty() && pageSize == 0
 
-/**
- * 初始状态
- */
-inline fun <T> PageState<T>.onInitial(action: PageState<T>.() -> Unit): PageState<T> {
-    if (result == null) action()
-    return this
-}
+/** 是否显示加载数据为空 */
+val PageState<*>.showLoadEmpty: Boolean get() = isSuccess && data.isEmpty()
 
-/**
- * 成功状态
- */
-inline fun <T> PageState<T>.onSuccess(action: PageState<T>.() -> Unit): PageState<T> {
-    result?.onSuccess { action() }
-    return this
-}
-
-/**
- * 失败状态
- */
-inline fun <T> PageState<T>.onFailure(action: PageState<T>.(exception: Throwable) -> Unit): PageState<T> {
-    result?.onFailure { action(it) }
-    return this
-}
-
-/**
- * 加载成功，并且总数据为空
- */
-inline fun <T> PageState<T>.onViewSuccessEmpty(action: PageState<T>.() -> Unit): PageState<T> {
-    onSuccess {
-        if (data.isEmpty()) action()
-    }
-    return this
-}
-
-/**
- * 加载失败，并且总数据为空
- */
-inline fun <T> PageState<T>.onViewFailureEmpty(action: PageState<T>.(exception: Throwable) -> Unit): PageState<T> {
-    onFailure {
-        if (data.isEmpty()) action(it)
-    }
-    return this
-}
+/** 是否显示加载数据失败 */
+val PageState<*>.showLoadFailure: Boolean get() = isFailure && data.isEmpty()
 
 //-------------------- impl --------------------
 
