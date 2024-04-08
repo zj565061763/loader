@@ -44,10 +44,10 @@ class LoaderTest {
         // onFinish
         runCatching {
             loader.load(
-                onFinish = { error("failure") },
+                onFinish = { error("failure onFinish") },
             ) { 1 }
         }.let { result ->
-            assertEquals("failure", result.exceptionOrNull()!!.message)
+            assertEquals("failure onFinish", result.exceptionOrNull()!!.message)
         }
     }
 
