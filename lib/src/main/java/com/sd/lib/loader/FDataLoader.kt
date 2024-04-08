@@ -71,30 +71,6 @@ val DataState<*>.isSuccess: Boolean get() = result?.isSuccess == true
 /** 是否失败状态 */
 val DataState<*>.isFailure: Boolean get() = result?.isFailure == true
 
-/**
- * 初始状态
- */
-inline fun <T> DataState<T>.onInitial(action: DataState<T>.() -> Unit): DataState<T> {
-    if (result == null) action()
-    return this
-}
-
-/**
- * 成功状态
- */
-inline fun <T> DataState<T>.onSuccess(action: DataState<T>.() -> Unit): DataState<T> {
-    result?.onSuccess { action() }
-    return this
-}
-
-/**
- * 失败状态
- */
-inline fun <T> DataState<T>.onFailure(action: DataState<T>.(exception: Throwable) -> Unit): DataState<T> {
-    result?.onFailure { action(it) }
-    return this
-}
-
 //-------------------- impl --------------------
 
 private class DataLoaderImpl<T>(initial: T) : FDataLoader<T>, FDataLoader.LoadScope<T> {

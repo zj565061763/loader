@@ -6,9 +6,6 @@ import com.sd.lib.loader.FDataLoader
 import com.sd.lib.loader.isFailure
 import com.sd.lib.loader.isInitial
 import com.sd.lib.loader.isSuccess
-import com.sd.lib.loader.onFailure
-import com.sd.lib.loader.onInitial
-import com.sd.lib.loader.onSuccess
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
@@ -175,33 +172,18 @@ private fun DataState<*>.testExtResult(state: LoaderResultState) {
             assertEquals(true, isInitial)
             assertEquals(false, isSuccess)
             assertEquals(false, isFailure)
-            var callbackString = ""
-            onInitial { callbackString += "onInitial" }
-            onSuccess { callbackString += "onSuccess" }
-            onFailure { callbackString += "onFailure" }
-            assertEquals("onInitial", callbackString)
         }
 
         LoaderResultState.Success -> {
             assertEquals(false, isInitial)
             assertEquals(true, isSuccess)
             assertEquals(false, isFailure)
-            var callbackString = ""
-            onInitial { callbackString += "onInitial" }
-            onSuccess { callbackString += "onSuccess" }
-            onFailure { callbackString += "onFailure" }
-            assertEquals("onSuccess", callbackString)
         }
 
         LoaderResultState.Failure -> {
             assertEquals(false, isInitial)
             assertEquals(false, isSuccess)
             assertEquals(true, isFailure)
-            var callbackString = ""
-            onInitial { callbackString += "onInitial" }
-            onSuccess { callbackString += "onSuccess" }
-            onFailure { callbackString += "onFailure" }
-            assertEquals("onFailure", callbackString)
         }
     }
 }
