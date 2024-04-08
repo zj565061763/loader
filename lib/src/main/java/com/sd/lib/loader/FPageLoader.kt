@@ -168,7 +168,6 @@ private class PageLoaderImpl<T>(
             onLoad = {
                 val page = refreshPage
                 onLoad(page).also { data ->
-                    _currentPage = page
                     handleLoadSuccess(page, data)
                 }
             },
@@ -202,7 +201,6 @@ private class PageLoaderImpl<T>(
             onLoad = {
                 val page = loadMorePage
                 onLoad(page).also { data ->
-                    if (data.isNotEmpty()) _currentPage = page
                     handleLoadSuccess(page, data)
                 }
             },
@@ -230,6 +228,15 @@ private class PageLoaderImpl<T>(
 
     private suspend fun handleLoadSuccess(page: Int, data: List<T>) {
         val totalData = dataHandler(page, data)
+
+        if (page == refreshPage) {
+            _currentPage = refreshPage
+        } else {
+            if (data.isNotEmpty()) {
+                _currentPage = page
+            }
+        }
+
         _state.update {
             it.copy(
                 data = totalData ?: it.data,
