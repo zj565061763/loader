@@ -83,6 +83,7 @@ class LoaderTest {
         loader.load { 2 }.let { result ->
             assertEquals(2, result.getOrThrow())
             assertEquals(true, job.isCancelled)
+            assertEquals(true, job.isCompleted)
         }
     }
 
