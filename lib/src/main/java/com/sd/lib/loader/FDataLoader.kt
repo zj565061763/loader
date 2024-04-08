@@ -19,7 +19,7 @@ interface FDataLoader<T> {
     val dataFlow: Flow<T>
 
     /**
-     * 加载数据，如果上一次加载还未完成，再次调用此方法，会取消上一次加载
+     * 开始加载，如果上一次加载还未完成，再次调用此方法，会取消上一次加载
      *
      * @param notifyLoading 是否通知[DataState.isLoading]
      * @param onLoad 加载回调
