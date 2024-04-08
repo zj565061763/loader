@@ -230,8 +230,10 @@ private class PageLoaderImpl<T>(
         val totalData = dataHandler(page, data)
 
         if (page == refreshPage) {
+            // refresh
             _currentPage = refreshPage
         } else {
+            // loadMore
             if (data.isNotEmpty()) {
                 _currentPage = page
             }
