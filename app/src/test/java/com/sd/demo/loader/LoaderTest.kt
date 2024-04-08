@@ -232,12 +232,13 @@ class LoaderTest {
                 onFinish = { list.add("onFinish") },
                 onFailure = { list.add("onFailure") },
                 onLoad = { list.add("onLoad") },
-            ).let { result ->
+            ).let {
                 assertEquals("onStart|onLoad|onFinish", list.joinToString("|"))
             }
         }
 
         assertEquals(true, job.isCancelled)
+        assertEquals(true, job.isCompleted)
         assertEquals("onStart|onLoad|onFinish", listCallback.joinToString("|"))
     }
 }
