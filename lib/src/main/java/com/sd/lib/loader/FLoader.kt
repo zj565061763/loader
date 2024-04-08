@@ -54,7 +54,10 @@ private class LoaderImpl : FLoader {
             try {
                 onStart()
                 currentCoroutineContext().ensureActive()
-                onLoad().let { data -> Result.success(data) }
+                onLoad().let { data ->
+                    currentCoroutineContext().ensureActive()
+                    Result.success(data)
+                }
             } catch (e: Throwable) {
                 if (e is CancellationException) throw e
                 onFailure(e)
