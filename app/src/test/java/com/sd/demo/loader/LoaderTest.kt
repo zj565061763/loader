@@ -33,21 +33,21 @@ class LoaderTest {
         }
 
         // onFailure
-        try {
+        runCatching {
             loader.load(
                 onFailure = { error("failure") },
             ) { error("load failure") }
-        } catch (e: Throwable) {
-            assertEquals("failure", e.message)
+        }.let { result ->
+            assertEquals("failure", result.exceptionOrNull()!!.message)
         }
 
         // onFinish
-        try {
+        runCatching {
             loader.load(
                 onFinish = { error("failure") },
             ) { 1 }
-        } catch (e: Throwable) {
-            assertEquals("failure", e.message)
+        }.let { result ->
+            assertEquals("failure", result.exceptionOrNull()!!.message)
         }
     }
 
