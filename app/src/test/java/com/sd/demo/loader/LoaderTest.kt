@@ -165,18 +165,18 @@ class LoaderTest {
 
         // onFinish
         mutableListOf<String>().let { list ->
-            try {
+            runCatching {
                 loader.load(
                     onStart = { list.add("onStart") },
                     onFinish = {
                         list.add("onFinish")
-                        error("failure")
+                        error("failure onFinish")
                     },
                     onFailure = { list.add("onFailure") },
                     onLoad = { list.add("onLoad") },
                 )
-            } catch (e: Throwable) {
-                assertEquals("failure", e.message)
+            }.let { result ->
+                assertEquals("failure onFinish", result.exceptionOrNull()!!.message)
                 assertEquals("onStart|onLoad|onFinish", list.joinToString("|"))
             }
         }
