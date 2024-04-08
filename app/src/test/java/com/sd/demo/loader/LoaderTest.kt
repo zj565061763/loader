@@ -35,10 +35,10 @@ class LoaderTest {
         // onFailure
         runCatching {
             loader.load(
-                onFailure = { error("failure") },
-            ) { error("load failure") }
+                onFailure = { error("failure onFailure") },
+            ) { error("failure") }
         }.let { result ->
-            assertEquals("failure", result.exceptionOrNull()!!.message)
+            assertEquals("failure onFailure", result.exceptionOrNull()!!.message)
         }
 
         // onFinish
@@ -129,12 +129,12 @@ class LoaderTest {
             loader.load(
                 onStart = {
                     list.add("onStart")
-                    error("failure")
+                    error("failure onStart")
                 },
                 onFinish = { list.add("onFinish") },
                 onFailure = {
                     list.add("onFailure")
-                    assertEquals("failure", it.message)
+                    assertEquals("failure onStart", it.message)
                 },
                 onLoad = { list.add("onLoad") },
             ).let {
@@ -144,18 +144,21 @@ class LoaderTest {
 
         // onFailure
         mutableListOf<String>().let { list ->
-            try {
+            runCatching {
                 loader.load(
                     onStart = { list.add("onStart") },
                     onFinish = { list.add("onFinish") },
                     onFailure = {
                         list.add("onFailure")
+                        error("failure onFailure")
+                    },
+                    onLoad = {
+                        list.add("onLoad")
                         error("failure")
                     },
-                    onLoad = { list.add("onLoad") },
                 )
-            } catch (e: Throwable) {
-                assertEquals("failure", e.message)
+            }.let { result ->
+                assertEquals("failure onFailure", result.exceptionOrNull()!!.message)
                 assertEquals("onStart|onLoad|onFailure|onFinish", list.joinToString("|"))
             }
         }
