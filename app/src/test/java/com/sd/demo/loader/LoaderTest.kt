@@ -137,7 +137,7 @@ class LoaderTest {
                     assertEquals("failure", it.message)
                 },
                 onLoad = { list.add("onLoad") },
-            ).let { result ->
+            ).let {
                 assertEquals("onStart|onFailure|onFinish", list.joinToString("|"))
             }
         }
