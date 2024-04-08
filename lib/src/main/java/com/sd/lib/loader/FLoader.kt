@@ -63,7 +63,7 @@ private class LoaderImpl : FLoader {
     }
 
     override suspend fun cancelLoad() {
-        _mutator.cancel()
+        _mutator.cancelAndJoin()
     }
 }
 
@@ -110,12 +110,14 @@ private class FMutator {
 
     //-------------------- ext --------------------
 
-    suspend fun cancel() {
+    suspend fun cancelAndJoin() {
         while (true) {
             val mutator = currentMutator.get() ?: return
             mutator.cancel()
-            if (currentMutator.compareAndSet(mutator, null)) {
-                mutex.withLock { }
+            try {
+                mutator.job.join()
+            } finally {
+                currentMutator.compareAndSet(mutator, null)
             }
         }
     }
