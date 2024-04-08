@@ -203,6 +203,7 @@ class LoaderTest {
         delay(1_000)
         loader.cancelLoad()
         assertEquals(true, job.isCancelled)
+        assertEquals(true, job.isCompleted)
         assertEquals("onStart|onLoad|onFinish", listCallback.joinToString("|"))
     }
 
