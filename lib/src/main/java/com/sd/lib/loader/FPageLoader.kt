@@ -55,7 +55,7 @@ interface FPageLoader<T> {
     fun setData(data: List<T>)
 
     interface LoadScope<T> {
-        /** 当前数据状态 */
+        /** 当前状态 */
         val currentState: PageState<T>
 
         /** 刷新数据的页码，例如数据源页码从1开始，那么[refreshPage]就为1 */
