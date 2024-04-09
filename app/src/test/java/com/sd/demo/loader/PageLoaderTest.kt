@@ -462,28 +462,32 @@ class PageLoaderTest {
             }
         }
 
+        val loading = TestContinuation()
         val loadJob = launch {
             loader.refresh {
+                loading.resume()
                 delay(2_000)
                 listOf(1, 2)
             }
         }
 
-        launch {
-            delay(1_000)
-            loader.state.run {
-                assertEquals(emptyList<Int>(), data)
-                assertEquals(null, result)
-                assertEquals(null, page)
-                assertEquals(null, pageSize)
-                assertEquals(true, isRefreshing)
-                assertEquals(false, isLoadingMore)
-                testExtResult(LoaderResultState.Initial)
-            }
+        loading.await()
+        loader.state.run {
+            assertEquals(emptyList<Int>(), data)
+            assertEquals(null, result)
+            assertEquals(null, page)
+            assertEquals(null, pageSize)
+            assertEquals(true, isRefreshing)
+            assertEquals(false, isLoadingMore)
+            testExtResult(LoaderResultState.Initial)
+        }
+
+        try {
             loader.loadMore { listOf(3, 4) }
-        }.let { job ->
-            job.join()
-            assertEquals(true, job.isCancelled)
+        } catch (e: CancellationException) {
+            Result.failure(e)
+        }.let { result ->
+            assertEquals(true, result.exceptionOrNull()!! is CancellationException)
         }
 
         loadJob.join()
