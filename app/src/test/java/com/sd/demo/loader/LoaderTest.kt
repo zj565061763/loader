@@ -25,15 +25,6 @@ class LoaderTest {
             assertEquals("failure", result.exceptionOrNull()!!.message)
         }
 
-        // onFailure
-        runCatching {
-            loader.load(
-                onFailure = { error("failure onFailure") },
-            ) { error("failure") }
-        }.let { result ->
-            assertEquals("failure onFailure", result.exceptionOrNull()!!.message)
-        }
-
         // onFinish
         runCatching {
             loader.load(
@@ -86,7 +77,6 @@ class LoaderTest {
         mutableListOf<String>().let { list ->
             loader.load(
                 onFinish = { list.add("onFinish") },
-                onFailure = { list.add("onFailure") },
                 onLoad = { list.add("onLoad") },
             ).let {
                 assertEquals("onLoad|onFinish", list.joinToString("|"))
@@ -102,36 +92,12 @@ class LoaderTest {
         mutableListOf<String>().let { list ->
             loader.load(
                 onFinish = { list.add("onFinish") },
-                onFailure = {
-                    list.add("onFailure")
-                    assertEquals("failure", it.message)
-                },
                 onLoad = {
                     list.add("onLoad")
                     error("failure")
                 },
             ).let {
-                assertEquals("onLoad|onFailure|onFinish", list.joinToString("|"))
-            }
-        }
-
-        // onFailure
-        mutableListOf<String>().let { list ->
-            runCatching {
-                loader.load(
-                    onFinish = { list.add("onFinish") },
-                    onFailure = {
-                        list.add("onFailure")
-                        error("failure onFailure")
-                    },
-                    onLoad = {
-                        list.add("onLoad")
-                        error("failure")
-                    },
-                )
-            }.let { result ->
-                assertEquals("failure onFailure", result.exceptionOrNull()!!.message)
-                assertEquals("onLoad|onFailure|onFinish", list.joinToString("|"))
+                assertEquals("onLoad|onFinish", list.joinToString("|"))
             }
         }
 
@@ -143,7 +109,6 @@ class LoaderTest {
                         list.add("onFinish")
                         error("failure onFinish")
                     },
-                    onFailure = { list.add("onFailure") },
                     onLoad = { list.add("onLoad") },
                 )
             }.let { result ->
@@ -161,7 +126,6 @@ class LoaderTest {
         launch {
             loader.load(
                 onFinish = { listCallback.add("onFinish") },
-                onFailure = { listCallback.add("onFailure") },
                 onLoad = {
                     listCallback.add("onLoad")
                     delay(2_000)
@@ -183,7 +147,6 @@ class LoaderTest {
         launch {
             loader.load(
                 onFinish = { listCallback.add("onFinish") },
-                onFailure = { listCallback.add("onFailure") },
                 onLoad = {
                     listCallback.add("onLoad")
                     delay(2_000)
@@ -196,7 +159,6 @@ class LoaderTest {
         mutableListOf<String>().let { list ->
             loader.load(
                 onFinish = { list.add("onFinish") },
-                onFailure = { list.add("onFailure") },
                 onLoad = { list.add("onLoad") },
             ).let {
                 assertEquals("onLoad|onFinish", list.joinToString("|"))

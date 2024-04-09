@@ -12,22 +12,19 @@ import java.util.concurrent.atomic.AtomicReference
 interface FLoader {
     /**
      * 开始加载，如果上一次加载还未完成，再次调用此方法，会取消上一次加载([CancellationException])，
-     * 如果[onLoad]触发了，则[onFinish]一定会触发。
-     * [onLoad]的异常会被捕获，除了[CancellationException]，捕获之后会通知[onFailure]。
+     * 如果[onLoad]触发了，则[onFinish]一定会触发，[onLoad]的异常会被捕获，除了[CancellationException]。
      *
      * @param onFinish 结束回调
-     * @param onFailure 失败回调
      * @param onLoad 加载回调
      */
     suspend fun <T> load(
         onFinish: () -> Unit = {},
-        onFailure: (Throwable) -> Unit = {},
         onLoad: suspend () -> T,
     ): Result<T>
 
     /**
      * 开始加载，如果上一次加载还未完成，再次调用此方法，会取消上一次加载([CancellationException])，
-     * 如果[onLoad]触发了，则[onFinish]一定会触发。
+     * 如果[onLoad]触发了，则[onFinish]一定会触发，[onLoad]的异常会被抛出。
      *
      * @param onFinish 结束回调
      * @param onLoad 加载回调
@@ -56,7 +53,6 @@ private class LoaderImpl : FLoader {
 
     override suspend fun <T> load(
         onFinish: () -> Unit,
-        onFailure: (Throwable) -> Unit,
         onLoad: suspend () -> T,
     ): Result<T> {
         return _mutator.mutate {
@@ -68,7 +64,6 @@ private class LoaderImpl : FLoader {
                 }
             } catch (e: Throwable) {
                 if (e is CancellationException) throw e
-                onFailure(e)
                 Result.failure(e)
             } finally {
                 onFinish()
