@@ -49,8 +49,8 @@ class LoaderTest {
         }
 
         loading.await()
-        loader.cancelLoad()
 
+        loader.cancelLoad()
         assertEquals(true, job.isCancelled)
         assertEquals(true, job.isCompleted)
     }
@@ -69,6 +69,7 @@ class LoaderTest {
         }
 
         loading.await()
+
         loader.load { 2 }.let { result ->
             assertEquals(2, result.getOrThrow())
             assertEquals(true, job.isCancelled)
@@ -128,18 +129,22 @@ class LoaderTest {
         val loader = FLoader()
 
         val listCallback = mutableListOf<String>()
+        val loading = TestContinuation()
+
         launch {
             loader.load(
                 onFinish = { listCallback.add("onFinish") },
                 onLoad = {
                     listCallback.add("onLoad")
-                    delay(2_000)
+                    loading.resume()
+                    delay(Long.MAX_VALUE)
                     1
                 },
             )
         }
 
-        delay(1_000)
+        loading.await()
+
         loader.cancelLoad()
         assertEquals("onLoad|onFinish", listCallback.joinToString("|"))
     }
@@ -149,18 +154,22 @@ class LoaderTest {
         val loader = FLoader()
 
         val listCallback = mutableListOf<String>()
+        val loading = TestContinuation()
+
         launch {
             loader.load(
                 onFinish = { listCallback.add("onFinish") },
                 onLoad = {
                     listCallback.add("onLoad")
-                    delay(2_000)
+                    loading.resume()
+                    delay(Long.MAX_VALUE)
                     1
                 },
             )
         }
 
-        delay(1_000)
+        loading.await()
+
         mutableListOf<String>().let { list ->
             loader.load(
                 onFinish = { list.add("onFinish") },
