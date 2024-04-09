@@ -1,6 +1,8 @@
 package com.sd.lib.loader
 
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -107,6 +109,7 @@ private class DataLoaderImpl<T>(initial: T) : FDataLoader<T>, FDataLoader.LoadSc
                 }
                 try {
                     onLoad().also { data ->
+                        currentCoroutineContext().ensureActive()
                         _state.update {
                             it.copy(
                                 data = data,
