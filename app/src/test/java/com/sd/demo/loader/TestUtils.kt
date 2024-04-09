@@ -1,9 +1,7 @@
 package com.sd.demo.loader
 
 import kotlinx.coroutines.CancellableContinuation
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.suspendCancellableCoroutine
-import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.coroutines.resume
 
 enum class LoaderResultState {
@@ -13,25 +11,33 @@ enum class LoaderResultState {
 }
 
 class TestContinuation {
-    private var _cont: CancellableContinuation<Unit>? = null
+    private var _result: Unit? = null
+    private val _holder: MutableSet<CancellableContinuation<Unit>> = mutableSetOf()
 
     suspend fun await() = suspendCancellableCoroutine { cont ->
         synchronized(this@TestContinuation) {
-            if (_cont != null) error("Last await not resumed.")
-            _cont = cont
+            if (_result == null) {
+                _holder.add(cont)
+                cont.invokeOnCancellation {
+                    synchronized(this@TestContinuation) {
+                        _holder.remove(cont)
+                    }
+                }
+            } else {
+                cont.resume(Unit)
+            }
         }
     }
 
     fun resume() {
         synchronized(this@TestContinuation) {
-            _cont?.resume(Unit)
-            _cont = null
+            _result = Unit
+            while (_holder.isNotEmpty()) {
+                _holder.toTypedArray().forEach { cont ->
+                    _holder.remove(cont)
+                    cont.resume(Unit)
+                }
+            }
         }
-    }
-}
-
-suspend fun AtomicBoolean.awaitTrue() {
-    while (!get()) {
-        delay(10)
     }
 }
