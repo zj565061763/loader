@@ -18,11 +18,6 @@ class TestContinuation {
         synchronized(this@TestContinuation) {
             if (_result == null) {
                 _holder.add(cont)
-                cont.invokeOnCancellation {
-                    synchronized(this@TestContinuation) {
-                        _holder.remove(cont)
-                    }
-                }
             } else {
                 cont.resume(Unit)
             }
@@ -32,12 +27,7 @@ class TestContinuation {
     fun resume() {
         synchronized(this@TestContinuation) {
             _result = Unit
-            while (_holder.isNotEmpty()) {
-                _holder.toTypedArray().forEach { cont ->
-                    _holder.remove(cont)
-                    cont.resume(Unit)
-                }
-            }
+            _holder.forEach { it.resume(Unit) }
         }
     }
 }
