@@ -509,14 +509,16 @@ class PageLoaderTest {
             assertEquals(false, isLoadingMore)
         }
 
+        val loading = TestContinuation()
         launch {
             loader.loadMore(notifyLoading = false) {
+                loading.resume()
                 delay(Long.MAX_VALUE)
                 listOf(1, 2)
             }
         }
 
-        delay(1_000)
+        loading.await()
         loader.state.run {
             assertEquals(false, isLoadingMore)
         }
