@@ -11,7 +11,9 @@ class LoaderTest {
     @Test
     fun `test load success`(): Unit = runBlocking {
         val loader = FLoader()
-        loader.load { 1 }.let { result ->
+        loader.load {
+            1
+        }.let { result ->
             assertEquals(1, result.getOrThrow())
         }
     }
@@ -21,7 +23,9 @@ class LoaderTest {
         val loader = FLoader()
 
         // onLoad
-        loader.load { error("failure") }.let { result ->
+        loader.load {
+            error("failure")
+        }.let { result ->
             assertEquals("failure", result.exceptionOrNull()!!.message)
         }
 
@@ -29,7 +33,9 @@ class LoaderTest {
         runCatching {
             loader.load(
                 onFinish = { error("failure onFinish") },
-            ) { 1 }
+            ) {
+                1
+            }
         }.let { result ->
             assertEquals("failure onFinish", result.exceptionOrNull()!!.message)
         }
