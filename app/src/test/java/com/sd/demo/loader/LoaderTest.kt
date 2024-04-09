@@ -8,6 +8,19 @@ import org.junit.Assert.assertEquals
 import org.junit.Test
 
 class LoaderTest {
+
+    @Test
+    fun `test loadOrThrow`(): Unit = runBlocking {
+        val loader = FLoader()
+        assertEquals(1, loader.loadOrThrow { 1 })
+
+        runCatching {
+            loader.loadOrThrow { error("failure") }
+        }.let { result ->
+            assertEquals("failure", result.exceptionOrNull()!!.message)
+        }
+    }
+
     @Test
     fun `test load success`(): Unit = runBlocking {
         val loader = FLoader()
