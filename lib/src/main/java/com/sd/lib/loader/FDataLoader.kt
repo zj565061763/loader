@@ -66,10 +66,10 @@ data class DataState<T>(
 /** 是否初始状态 */
 val DataState<*>.isInitial: Boolean get() = result == null
 
-/** 是否成功状态 */
+/** 是否成功状态(最后一次加载的结果) */
 val DataState<*>.isSuccess: Boolean get() = result?.isSuccess == true
 
-/** 是否失败状态 */
+/** 是否失败状态(最后一次加载的结果) */
 val DataState<*>.isFailure: Boolean get() = result?.isFailure == true
 
 //-------------------- impl --------------------
