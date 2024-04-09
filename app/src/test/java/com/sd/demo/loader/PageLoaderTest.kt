@@ -39,7 +39,10 @@ class PageLoaderTest {
             }
         }
 
-        loader.refresh { listOf(1, 2) }.let { result ->
+        loader.refresh { page ->
+            assertEquals(refreshPage, page)
+            listOf(1, 2)
+        }.let { result ->
             assertEquals(true, result.isSuccess)
             assertEquals(listOf(1, 2), result.getOrThrow())
         }
@@ -293,7 +296,10 @@ class PageLoaderTest {
         }
 
         // 1
-        loader.loadMore { listOf(1, 2) }.let { result ->
+        loader.loadMore { page ->
+            assertEquals(refreshPage, page)
+            listOf(1, 2)
+        }.let { result ->
             assertEquals(true, result.isSuccess)
             assertEquals(listOf(1, 2), result.getOrThrow())
         }
@@ -308,7 +314,10 @@ class PageLoaderTest {
         }
 
         // 2
-        loader.loadMore { listOf(3, 4) }.let { result ->
+        loader.loadMore { page ->
+            assertEquals(refreshPage + 1, page)
+            listOf(3, 4)
+        }.let { result ->
             assertEquals(true, result.isSuccess)
             assertEquals(listOf(3, 4), result.getOrThrow())
         }
@@ -323,7 +332,10 @@ class PageLoaderTest {
         }
 
         // 3
-        loader.loadMore { emptyList() }.let { result ->
+        loader.loadMore { page ->
+            assertEquals(refreshPage + 2, page)
+            emptyList()
+        }.let { result ->
             assertEquals(true, result.isSuccess)
             assertEquals(emptyList<Int>(), result.getOrThrow())
         }
