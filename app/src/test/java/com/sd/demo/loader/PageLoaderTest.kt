@@ -331,8 +331,27 @@ class PageLoaderTest {
             testExtResult(LoaderResultState.Success)
         }
 
-        // 3
+        // 3 空数据
         loader.loadMore { page ->
+            assertEquals(refreshPage + 2, page)
+            emptyList()
+        }.let { result ->
+            assertEquals(true, result.isSuccess)
+            assertEquals(emptyList<Int>(), result.getOrThrow())
+        }
+        loader.state.run {
+            assertEquals(listOf(1, 2, 3, 4), data)
+            assertEquals(Result.success(Unit), result)
+            assertEquals(loader.refreshPage + 2, page)
+            assertEquals(0, pageSize)
+            assertEquals(false, isRefreshing)
+            assertEquals(false, isLoadingMore)
+            testExtResult(LoaderResultState.Success)
+        }
+
+        // 4
+        loader.loadMore { page ->
+            // 由于上一次加载的是空数据，所以此次的page和上一次应该一样
             assertEquals(refreshPage + 2, page)
             emptyList()
         }.let { result ->
