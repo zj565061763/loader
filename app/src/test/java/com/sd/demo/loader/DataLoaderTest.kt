@@ -58,14 +58,17 @@ class DataLoaderTest {
     fun `test load cancel`(): Unit = runBlocking {
         val loader = FDataLoader(0)
 
+        val loading = TestContinuation()
         launch {
             loader.load {
+                loading.resume()
                 delay(Long.MAX_VALUE)
                 1
             }
         }
 
-        delay(1_000)
+        loading.await()
+
         loader.state.run {
             assertEquals(0, data)
             assertEquals(null, result)
@@ -73,6 +76,7 @@ class DataLoaderTest {
         }
 
         loader.cancelLoad()
+
         loader.state.run {
             assertEquals(0, data)
             assertEquals(null, result)
@@ -84,14 +88,17 @@ class DataLoaderTest {
     fun `test load when loading`(): Unit = runBlocking {
         val loader = FDataLoader(0)
 
+        val loading = TestContinuation()
         launch {
             loader.load {
+                loading.resume()
                 delay(Long.MAX_VALUE)
                 1
             }
         }
 
-        delay(1_000)
+        loading.await()
+
         loader.state.run {
             assertEquals(0, data)
             assertEquals(null, result)
@@ -102,6 +109,7 @@ class DataLoaderTest {
             assertEquals(true, result.isSuccess)
             assertEquals(2, result.getOrThrow())
         }
+
         loader.state.run {
             assertEquals(2, data)
             assertEquals(Result.success(Unit), result)
@@ -116,14 +124,16 @@ class DataLoaderTest {
             assertEquals(false, isLoading)
         }
 
+        val loading = TestContinuation()
         launch {
             loader.load(notifyLoading = false) {
+                loading.resume()
                 delay(Long.MAX_VALUE)
                 1
             }
         }
 
-        delay(1_000)
+        loading.await()
         loader.state.run {
             assertEquals(false, isLoading)
         }
