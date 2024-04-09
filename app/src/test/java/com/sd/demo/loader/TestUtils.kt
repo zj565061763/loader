@@ -26,6 +26,7 @@ class TestContinuation {
 
     fun resume() {
         synchronized(this@TestContinuation) {
+            check(_result == null) { "Resumed" }
             _result = Unit
             _holder.forEach { it.resume(Unit) }
         }
