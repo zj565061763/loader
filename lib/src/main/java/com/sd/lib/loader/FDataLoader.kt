@@ -55,7 +55,7 @@ data class DataState<T>(
     /** 数据 */
     val data: T,
 
-    /** 数据结果 */
+    /** 最后一次加载的结果 */
     val result: Result<Unit>? = null,
 
     /** 是否正在加载中 */
