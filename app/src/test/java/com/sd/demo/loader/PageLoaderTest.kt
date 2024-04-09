@@ -172,14 +172,16 @@ class PageLoaderTest {
             }
         }
 
+        val loading = TestContinuation()
         launch {
             loader.loadMore {
+                loading.resume()
                 delay(Long.MAX_VALUE)
                 listOf(1, 2)
             }
         }
 
-        delay(1_000)
+        loading.await()
         loader.state.run {
             assertEquals(emptyList<Int>(), data)
             assertEquals(null, result)
