@@ -292,6 +292,7 @@ class PageLoaderTest {
             }
         }
 
+        // 1
         loader.loadMore { listOf(1, 2) }.let { result ->
             assertEquals(true, result.isSuccess)
             assertEquals(listOf(1, 2), result.getOrThrow())
@@ -306,6 +307,7 @@ class PageLoaderTest {
             testExtResult(LoaderResultState.Success)
         }
 
+        // 2
         loader.loadMore { listOf(3, 4) }.let { result ->
             assertEquals(true, result.isSuccess)
             assertEquals(listOf(3, 4), result.getOrThrow())
@@ -320,6 +322,7 @@ class PageLoaderTest {
             testExtResult(LoaderResultState.Success)
         }
 
+        // 3
         loader.loadMore { emptyList() }.let { result ->
             assertEquals(true, result.isSuccess)
             assertEquals(emptyList<Int>(), result.getOrThrow())
@@ -327,7 +330,7 @@ class PageLoaderTest {
         loader.state.run {
             assertEquals(listOf(1, 2, 3, 4), data)
             assertEquals(Result.success(Unit), result)
-            assertEquals(loader.refreshPage + 1, page)
+            assertEquals(loader.refreshPage + 2, page)
             assertEquals(0, pageSize)
             assertEquals(false, isRefreshing)
             assertEquals(false, isLoadingMore)

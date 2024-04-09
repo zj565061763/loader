@@ -242,23 +242,21 @@ private class PageLoaderImpl<T>(
         val totalData = dataHandler(page, data)
         currentCoroutineContext().ensureActive()
 
-        val statePage = if (page == refreshPage) {
+        if (page == refreshPage) {
             // refresh
-            refreshPage
+            _currentPage = refreshPage
         } else {
             // loadMore
-            page.takeIf { data.isNotEmpty() }
-        }
-
-        statePage?.let {
-            _currentPage = it
+            if (data.isNotEmpty()) {
+                _currentPage = page
+            }
         }
 
         _state.update {
             it.copy(
                 data = totalData ?: it.data,
                 result = Result.success(Unit),
-                page = statePage ?: it.page,
+                page = page,
                 pageSize = data.size,
             )
         }
