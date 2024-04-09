@@ -153,27 +153,26 @@ private class PageLoaderImpl<T>(
         onLoad: suspend FPageLoader.LoadScope<T>.(page: Int) -> List<T>,
     ): Result<List<T>> {
         return _refreshLoader.load(
-            onStart = {
-                // 取消加载更多
-                cancelLoadMore()
-                if (notifyLoading) {
-                    _state.update { it.copy(isRefreshing = true) }
-                }
-            },
             onFinish = {
                 if (notifyLoading) {
                     _state.update { it.copy(isRefreshing = false) }
                 }
             },
-            onLoad = {
-                val page = refreshPage
-                onLoad(page).also { data ->
-                    handleLoadSuccess(page, data)
-                }
-            },
             onFailure = { error ->
                 _state.update {
                     it.copy(result = Result.failure(error))
+                }
+            },
+            onLoad = {
+                // 取消加载更多
+                cancelLoadMore()
+                if (notifyLoading) {
+                    _state.update { it.copy(isRefreshing = true) }
+                }
+
+                val page = refreshPage
+                onLoad(page).also { data ->
+                    handleLoadSuccess(page, data)
                 }
             },
         )
@@ -188,25 +187,24 @@ private class PageLoaderImpl<T>(
         }
 
         return _loadMoreLoader.load(
-            onStart = {
-                if (notifyLoading) {
-                    _state.update { it.copy(isLoadingMore = true) }
-                }
-            },
             onFinish = {
                 if (notifyLoading) {
                     _state.update { it.copy(isLoadingMore = false) }
                 }
             },
-            onLoad = {
-                val page = loadMorePage
-                onLoad(page).also { data ->
-                    handleLoadSuccess(page, data)
-                }
-            },
             onFailure = { error ->
                 _state.update {
                     it.copy(result = Result.failure(error))
+                }
+            },
+            onLoad = {
+                if (notifyLoading) {
+                    _state.update { it.copy(isLoadingMore = true) }
+                }
+
+                val page = loadMorePage
+                onLoad(page).also { data ->
+                    handleLoadSuccess(page, data)
                 }
             },
         )

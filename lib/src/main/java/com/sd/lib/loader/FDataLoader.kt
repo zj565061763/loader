@@ -95,17 +95,20 @@ private class DataLoaderImpl<T>(initial: T) : FDataLoader<T>, FDataLoader.LoadSc
         onLoad: suspend FDataLoader.LoadScope<T>.() -> T
     ): Result<T> {
         return _loader.load(
-            onStart = {
-                if (notifyLoading) {
-                    _state.update { it.copy(isLoading = true) }
-                }
-            },
             onFinish = {
                 if (notifyLoading) {
                     _state.update { it.copy(isLoading = false) }
                 }
             },
+            onFailure = { error ->
+                _state.update {
+                    it.copy(result = Result.failure(error))
+                }
+            },
             onLoad = {
+                if (notifyLoading) {
+                    _state.update { it.copy(isLoading = true) }
+                }
                 onLoad().also { data ->
                     _state.update {
                         it.copy(
@@ -113,11 +116,6 @@ private class DataLoaderImpl<T>(initial: T) : FDataLoader<T>, FDataLoader.LoadSc
                             result = Result.success(Unit),
                         )
                     }
-                }
-            },
-            onFailure = { error ->
-                _state.update {
-                    it.copy(result = Result.failure(error))
                 }
             },
         )

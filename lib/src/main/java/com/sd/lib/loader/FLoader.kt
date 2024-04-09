@@ -11,24 +11,22 @@ import java.util.concurrent.atomic.AtomicReference
 
 interface FLoader {
     /**
-     * 开始加载，如果上一次加载还未完成，再次调用此方法，会取消上一次加载(CancellationException)，
-     * 如果[onStart]触发了，则[onFinish]一定会触发。
-     * [onStart],[onLoad]的异常会被捕获，除了[CancellationException]，捕获之后会通知[onFailure]。
+     * 开始加载，如果上一次加载还未完成，再次调用此方法，会取消上一次加载([CancellationException])，
+     * 如果[onLoad]触发了，则[onFinish]一定会触发。
+     * [onLoad]的异常会被捕获，除了[CancellationException]，捕获之后会通知[onFailure]。
      *
-     * @param onStart 开始回调
      * @param onFinish 结束回调
      * @param onFailure 失败回调
      * @param onLoad 加载回调
      */
     suspend fun <T> load(
-        onStart: suspend () -> Unit = {},
         onFinish: () -> Unit = {},
         onFailure: (Throwable) -> Unit = {},
         onLoad: suspend () -> T,
     ): Result<T>
 
     /**
-     * 开始加载，如果上一次加载还未完成，再次调用此方法，会取消上一次加载(CancellationException)，
+     * 开始加载，如果上一次加载还未完成，再次调用此方法，会取消上一次加载([CancellationException])，
      * 如果[onLoad]触发了，则[onFinish]一定会触发。
      *
      * @param onFinish 结束回调
@@ -57,14 +55,12 @@ private class LoaderImpl : FLoader {
     private val _mutator = FMutator()
 
     override suspend fun <T> load(
-        onStart: suspend () -> Unit,
         onFinish: () -> Unit,
         onFailure: (Throwable) -> Unit,
         onLoad: suspend () -> T,
     ): Result<T> {
         return _mutator.mutate {
             try {
-                onStart()
                 currentCoroutineContext().ensureActive()
                 onLoad().let { data ->
                     currentCoroutineContext().ensureActive()
