@@ -1,5 +1,7 @@
 package com.sd.lib.loader
 
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -235,16 +237,21 @@ private class PageLoaderImpl<T>(
     }
 
     private suspend fun handleLoadSuccess(page: Int, data: List<T>) {
-        // dataHandler可能会抛异常，放在最开始执行，发生异常后不执行下面的代码
+        // dataHandler可能会抛异常，发生异常后不执行下面的代码
+        currentCoroutineContext().ensureActive()
         val totalData = dataHandler(page, data)
+        currentCoroutineContext().ensureActive()
 
+        var statePage: Int? = null
         if (page == refreshPage) {
             // refresh
             _currentPage = refreshPage
+            statePage = refreshPage
         } else {
             // loadMore
             if (data.isNotEmpty()) {
                 _currentPage = page
+                statePage = page
             }
         }
 
@@ -252,7 +259,7 @@ private class PageLoaderImpl<T>(
             it.copy(
                 data = totalData ?: it.data,
                 result = Result.success(Unit),
-                page = page,
+                page = statePage ?: it.page,
                 pageSize = data.size,
             )
         }
