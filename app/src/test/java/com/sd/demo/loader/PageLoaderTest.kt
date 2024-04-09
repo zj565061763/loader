@@ -6,6 +6,7 @@ import com.sd.lib.loader.PageState
 import com.sd.lib.loader.isFailure
 import com.sd.lib.loader.isInitial
 import com.sd.lib.loader.isSuccess
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
@@ -369,14 +370,16 @@ class PageLoaderTest {
             }
         }
 
+        val loading = TestContinuation()
         launch {
             loader.loadMore {
+                loading.resume()
                 delay(Long.MAX_VALUE)
                 listOf(1, 2)
             }
         }
 
-        delay(1_000)
+        loading.await()
         loader.state.run {
             assertEquals(emptyList<Int>(), data)
             assertEquals(null, result)
@@ -409,28 +412,32 @@ class PageLoaderTest {
             }
         }
 
+        val loading = TestContinuation()
         val loadJob = launch {
             loader.loadMore {
-                delay(2_000)
+                loading.resume()
+                delay(1_000)
                 listOf(1, 2)
             }
         }
 
-        launch {
-            delay(1_000)
-            loader.state.run {
-                assertEquals(emptyList<Int>(), data)
-                assertEquals(null, result)
-                assertEquals(null, page)
-                assertEquals(null, pageSize)
-                assertEquals(false, isRefreshing)
-                assertEquals(true, isLoadingMore)
-                testExtResult(LoaderResultState.Initial)
-            }
+        loading.await()
+        loader.state.run {
+            assertEquals(emptyList<Int>(), data)
+            assertEquals(null, result)
+            assertEquals(null, page)
+            assertEquals(null, pageSize)
+            assertEquals(false, isRefreshing)
+            assertEquals(true, isLoadingMore)
+            testExtResult(LoaderResultState.Initial)
+        }
+
+        try {
             loader.loadMore { listOf(3, 4) }
-        }.let { job ->
-            job.join()
-            assertEquals(true, job.isCancelled)
+        } catch (e: CancellationException) {
+            Result.failure(e)
+        }.let { result ->
+            assertEquals(true, result.exceptionOrNull()!! is CancellationException)
         }
 
         loadJob.join()
