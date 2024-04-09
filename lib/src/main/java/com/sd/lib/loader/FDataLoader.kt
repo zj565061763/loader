@@ -1,5 +1,6 @@
 package com.sd.lib.loader
 
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -100,22 +101,26 @@ private class DataLoaderImpl<T>(initial: T) : FDataLoader<T>, FDataLoader.LoadSc
                     _state.update { it.copy(isLoading = false) }
                 }
             },
-            onFailure = { error ->
-                _state.update {
-                    it.copy(result = Result.failure(error))
-                }
-            },
             onLoad = {
                 if (notifyLoading) {
                     _state.update { it.copy(isLoading = true) }
                 }
-                onLoad().also { data ->
-                    _state.update {
-                        it.copy(
-                            data = data,
-                            result = Result.success(Unit),
-                        )
+                try {
+                    onLoad().also { data ->
+                        _state.update {
+                            it.copy(
+                                data = data,
+                                result = Result.success(Unit),
+                            )
+                        }
                     }
+                } catch (e: Throwable) {
+                    if (e !is CancellationException) {
+                        _state.update {
+                            it.copy(result = Result.failure(e))
+                        }
+                    }
+                    throw e
                 }
             },
         )
