@@ -59,14 +59,16 @@ class LoaderTest {
     fun `test load when loading`(): Unit = runBlocking {
         val loader = FLoader()
 
+        val loading = TestContinuation()
         val job = launch {
             loader.load {
-                delay(2_000)
+                loading.resume()
+                delay(Long.MAX_VALUE)
                 1
             }
         }
 
-        delay(1_000)
+        loading.await()
         loader.load { 2 }.let { result ->
             assertEquals(2, result.getOrThrow())
             assertEquals(true, job.isCancelled)
