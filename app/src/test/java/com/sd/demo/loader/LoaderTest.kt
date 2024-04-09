@@ -39,15 +39,18 @@ class LoaderTest {
     fun `test load cancel`(): Unit = runBlocking {
         val loader = FLoader()
 
+        val loading = TestContinuation()
         val job = launch {
             loader.load {
-                delay(2_000)
+                loading.resume()
+                delay(Long.MAX_VALUE)
                 1
             }
         }
 
-        delay(1_000)
+        loading.await()
         loader.cancelLoad()
+
         assertEquals(true, job.isCancelled)
         assertEquals(true, job.isCompleted)
     }
