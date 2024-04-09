@@ -158,11 +158,6 @@ private class PageLoaderImpl<T>(
                     _state.update { it.copy(isRefreshing = false) }
                 }
             },
-            onFailure = { error ->
-                _state.update {
-                    it.copy(result = Result.failure(error))
-                }
-            },
             onLoad = {
                 // 取消加载更多
                 cancelLoadMore()
@@ -171,8 +166,18 @@ private class PageLoaderImpl<T>(
                 }
 
                 val page = refreshPage
-                onLoad(page).also { data ->
-                    handleLoadSuccess(page, data)
+
+                try {
+                    onLoad(page).also { data ->
+                        handleLoadSuccess(page, data)
+                    }
+                } catch (e: Throwable) {
+                    if (e !is CancellationException) {
+                        _state.update {
+                            it.copy(result = Result.failure(e))
+                        }
+                    }
+                    throw e
                 }
             },
         )
@@ -192,19 +197,24 @@ private class PageLoaderImpl<T>(
                     _state.update { it.copy(isLoadingMore = false) }
                 }
             },
-            onFailure = { error ->
-                _state.update {
-                    it.copy(result = Result.failure(error))
-                }
-            },
             onLoad = {
                 if (notifyLoading) {
                     _state.update { it.copy(isLoadingMore = true) }
                 }
 
                 val page = loadMorePage
-                onLoad(page).also { data ->
-                    handleLoadSuccess(page, data)
+
+                try {
+                    onLoad(page).also { data ->
+                        handleLoadSuccess(page, data)
+                    }
+                } catch (e: Throwable) {
+                    if (e !is CancellationException) {
+                        _state.update {
+                            it.copy(result = Result.failure(e))
+                        }
+                    }
+                    throw e
                 }
             },
         )
