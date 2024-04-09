@@ -136,10 +136,6 @@ private class PageLoaderImpl<T>(
     private val _loadMoreLoader = FLoader()
 
     private val _state: MutableStateFlow<PageState<T>> = MutableStateFlow(PageState(data = initial))
-    private var _currentPage = refreshPage - 1
-
-    private val loadMorePage: Int
-        get() = if (state.data.isEmpty()) refreshPage else _currentPage + 1
 
     override val state: PageState<T>
         get() = _state.value
@@ -204,7 +200,7 @@ private class PageLoaderImpl<T>(
                     _state.update { it.copy(isLoadingMore = true) }
                 }
 
-                val page = loadMorePage
+                val page = getLoadMorePage()
 
                 try {
                     onLoad(page).also { data ->
@@ -236,21 +232,16 @@ private class PageLoaderImpl<T>(
         }
     }
 
+    private fun getLoadMorePage(): Int {
+        if (state.data.isEmpty()) return refreshPage
+        val lastPage = state.page ?: return refreshPage
+        return if (state.pageSize!! <= 0) lastPage else lastPage + 1
+    }
+
     private suspend fun handleLoadSuccess(page: Int, data: List<T>) {
-        // dataHandler可能会抛异常，发生异常后不执行下面的代码
         currentCoroutineContext().ensureActive()
         val totalData = dataHandler(page, data)
         currentCoroutineContext().ensureActive()
-
-        if (page == refreshPage) {
-            // refresh
-            _currentPage = refreshPage
-        } else {
-            // loadMore
-            if (data.isNotEmpty()) {
-                _currentPage = page
-            }
-        }
 
         _state.update {
             it.copy(
