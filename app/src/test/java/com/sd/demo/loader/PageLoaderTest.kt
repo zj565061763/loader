@@ -49,7 +49,7 @@ class PageLoaderTest {
         loader.state.run {
             assertEquals(listOf(1, 2), data)
             assertEquals(Result.success(Unit), result)
-            assertEquals(loader.refreshPage, page)
+            assertEquals(refreshPage, page)
             assertEquals(2, pageSize)
             assertEquals(false, isRefreshing)
             assertEquals(false, isLoadingMore)
@@ -158,7 +158,7 @@ class PageLoaderTest {
         loader.state.run {
             assertEquals(listOf(3, 4), data)
             assertEquals(Result.success(Unit), result)
-            assertEquals(loader.refreshPage, page)
+            assertEquals(refreshPage, page)
             assertEquals(2, pageSize)
             assertEquals(false, isRefreshing)
             assertEquals(false, isLoadingMore)
@@ -200,7 +200,7 @@ class PageLoaderTest {
         loader.state.run {
             assertEquals(listOf(3, 4), data)
             assertEquals(Result.success(Unit), result)
-            assertEquals(loader.refreshPage, page)
+            assertEquals(refreshPage, page)
             assertEquals(2, pageSize)
             assertEquals(false, isRefreshing)
             assertEquals(false, isLoadingMore)
@@ -268,7 +268,7 @@ class PageLoaderTest {
             awaitItem().run {
                 assertEquals(listOf(3, 4), data)
                 assertEquals(Result.success(Unit), result)
-                assertEquals(loader.refreshPage, page)
+                assertEquals(refreshPage, page)
                 assertEquals(2, pageSize)
                 assertEquals(true, isRefreshing)
                 assertEquals(false, isLoadingMore)
@@ -276,7 +276,7 @@ class PageLoaderTest {
             awaitItem().run {
                 assertEquals(listOf(3, 4), data)
                 assertEquals(Result.success(Unit), result)
-                assertEquals(loader.refreshPage, page)
+                assertEquals(refreshPage, page)
                 assertEquals(2, pageSize)
                 assertEquals(false, isRefreshing)
                 assertEquals(false, isLoadingMore)
@@ -306,7 +306,7 @@ class PageLoaderTest {
         loader.state.run {
             assertEquals(listOf(1, 2), data)
             assertEquals(Result.success(Unit), result)
-            assertEquals(loader.refreshPage, page)
+            assertEquals(refreshPage, page)
             assertEquals(2, pageSize)
             assertEquals(false, isRefreshing)
             assertEquals(false, isLoadingMore)
@@ -324,7 +324,7 @@ class PageLoaderTest {
         loader.state.run {
             assertEquals(listOf(1, 2, 3, 4), data)
             assertEquals(Result.success(Unit), result)
-            assertEquals(loader.refreshPage + 1, page)
+            assertEquals(refreshPage + 1, page)
             assertEquals(2, pageSize)
             assertEquals(false, isRefreshing)
             assertEquals(false, isLoadingMore)
@@ -342,7 +342,7 @@ class PageLoaderTest {
         loader.state.run {
             assertEquals(listOf(1, 2, 3, 4), data)
             assertEquals(Result.success(Unit), result)
-            assertEquals(loader.refreshPage + 2, page)
+            assertEquals(refreshPage + 2, page)
             assertEquals(0, pageSize)
             assertEquals(false, isRefreshing)
             assertEquals(false, isLoadingMore)
@@ -361,7 +361,7 @@ class PageLoaderTest {
         loader.state.run {
             assertEquals(listOf(1, 2, 3, 4), data)
             assertEquals(Result.success(Unit), result)
-            assertEquals(loader.refreshPage + 2, page)
+            assertEquals(refreshPage + 2, page)
             assertEquals(0, pageSize)
             assertEquals(false, isRefreshing)
             assertEquals(false, isLoadingMore)
@@ -478,7 +478,7 @@ class PageLoaderTest {
         loader.state.run {
             assertEquals(listOf(1, 2), data)
             assertEquals(Result.success(Unit), result)
-            assertEquals(loader.refreshPage, page)
+            assertEquals(refreshPage, page)
             assertEquals(2, pageSize)
             assertEquals(false, isRefreshing)
             assertEquals(false, isLoadingMore)
@@ -528,7 +528,7 @@ class PageLoaderTest {
         loader.state.run {
             assertEquals(listOf(1, 2), data)
             assertEquals(Result.success(Unit), result)
-            assertEquals(loader.refreshPage, page)
+            assertEquals(refreshPage, page)
             assertEquals(2, pageSize)
             assertEquals(false, isRefreshing)
             assertEquals(false, isLoadingMore)
@@ -596,7 +596,7 @@ class PageLoaderTest {
             awaitItem().run {
                 assertEquals(listOf(3, 4), data)
                 assertEquals(Result.success(Unit), result)
-                assertEquals(loader.refreshPage, page)
+                assertEquals(refreshPage, page)
                 assertEquals(2, pageSize)
                 assertEquals(false, isRefreshing)
                 assertEquals(true, isLoadingMore)
@@ -604,7 +604,7 @@ class PageLoaderTest {
             awaitItem().run {
                 assertEquals(listOf(3, 4), data)
                 assertEquals(Result.success(Unit), result)
-                assertEquals(loader.refreshPage, page)
+                assertEquals(refreshPage, page)
                 assertEquals(2, pageSize)
                 assertEquals(false, isRefreshing)
                 assertEquals(false, isLoadingMore)

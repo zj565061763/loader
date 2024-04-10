@@ -16,9 +16,6 @@ interface FPageLoader<T> {
     /** 状态流 */
     val stateFlow: Flow<PageState<T>>
 
-    /** 刷新数据的页码，例如数据源页码从1开始，那么[refreshPage]就为1 */
-    val refreshPage: Int
-
     /**
      * 刷新
      *
@@ -61,7 +58,7 @@ interface FPageLoader<T> {
         val currentState: PageState<T>
 
         /** 刷新数据的页码，例如数据源页码从1开始，那么[refreshPage]就为1 */
-        val refreshPage: Int
+        val refreshPage: Int get() = currentState.refreshPage
     }
 }
 
@@ -99,6 +96,9 @@ data class PageState<T>(
     /** 最后一次加载的数据个数 */
     val pageSize: Int? = null,
 
+    /** 刷新数据的页码，例如数据源页码从1开始，那么[refreshPage]就为1 */
+    val refreshPage: Int,
+
     /** 是否正在刷新 */
     val isRefreshing: Boolean = false,
 
@@ -128,14 +128,19 @@ val PageState<*>.showLoadFailure: Boolean get() = isFailure && data.isEmpty()
 
 private class PageLoaderImpl<T>(
     initial: List<T>,
-    override val refreshPage: Int,
+    refreshPage: Int,
     private val dataHandler: suspend FPageLoader.LoadScope<T>.(page: Int, pageData: List<T>) -> List<T>?,
 ) : FPageLoader<T>, FPageLoader.LoadScope<T> {
 
     private val _refreshLoader = FLoader()
     private val _loadMoreLoader = FLoader()
 
-    private val _state: MutableStateFlow<PageState<T>> = MutableStateFlow(PageState(data = initial))
+    private val _state: MutableStateFlow<PageState<T>> = MutableStateFlow(
+        PageState(
+            data = initial,
+            refreshPage = refreshPage,
+        )
+    )
 
     override val state: PageState<T>
         get() = _state.value
@@ -163,7 +168,7 @@ private class PageLoaderImpl<T>(
                     _state.update { it.copy(isRefreshing = true) }
                 }
 
-                val page = refreshPage
+                val page = state.refreshPage
 
                 try {
                     onLoad(page).also { data ->
@@ -233,8 +238,8 @@ private class PageLoaderImpl<T>(
     }
 
     private fun getLoadMorePage(): Int {
-        if (state.data.isEmpty()) return refreshPage
-        val lastPage = state.page ?: return refreshPage
+        if (state.data.isEmpty()) return state.refreshPage
+        val lastPage = state.page ?: return state.refreshPage
         return if (state.pageSize!! <= 0) lastPage else lastPage + 1
     }
 
