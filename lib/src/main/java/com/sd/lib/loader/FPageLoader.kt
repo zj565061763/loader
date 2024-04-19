@@ -97,7 +97,7 @@ data class PageState<T>(
     val pageSize: Int? = null,
 
     /** 刷新数据的页码，例如数据源页码从1开始，那么[refreshPage]就为1 */
-    val refreshPage: Int,
+    val refreshPage: Int = 1,
 
     /** 是否正在刷新 */
     val isRefreshing: Boolean = false,
@@ -164,6 +164,7 @@ private class PageLoaderImpl<T>(
             onLoad = {
                 // 取消加载更多
                 cancelLoadMore()
+
                 if (notifyLoading) {
                     _state.update { it.copy(isRefreshing = true) }
                 }
