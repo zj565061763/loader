@@ -17,7 +17,7 @@ interface FPageLoader<T> {
     val stateFlow: Flow<PageState<T>>
 
     /**
-     * 刷新
+     * 刷新，会取消正在刷新或者正在加载更多的任务
      *
      * @param notifyLoading 是否通知[PageState.isRefreshing]
      * @param onLoad 加载回调
