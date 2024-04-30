@@ -128,7 +128,9 @@ private class DataLoaderImpl<T>(initial: T) : FDataLoader<T>, FDataLoader.LoadSc
                         }
                     }
                 } catch (e: Throwable) {
-                    if (e !is CancellationException) {
+                    if (e is CancellationException) {
+                        // 取消异常
+                    } else {
                         _state.update {
                             it.copy(result = Result.failure(e))
                         }
