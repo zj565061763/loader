@@ -177,7 +177,9 @@ private class PageLoaderImpl<T>(
                         handleLoadSuccess(page, data)
                     }
                 } catch (e: Throwable) {
-                    if (e !is CancellationException) {
+                    if (e is CancellationException) {
+                        // 取消异常
+                    } else {
                         _state.update {
                             it.copy(result = Result.failure(e))
                         }
@@ -214,7 +216,9 @@ private class PageLoaderImpl<T>(
                         handleLoadSuccess(page, data)
                     }
                 } catch (e: Throwable) {
-                    if (e !is CancellationException) {
+                    if (e is CancellationException) {
+                        // 取消异常
+                    } else {
                         _state.update {
                             it.copy(result = Result.failure(e))
                         }
