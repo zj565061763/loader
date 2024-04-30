@@ -2,10 +2,6 @@ package com.sd.demo.loader
 
 import app.cash.turbine.test
 import com.sd.lib.loader.FPageLoader
-import com.sd.lib.loader.PageState
-import com.sd.lib.loader.isFailure
-import com.sd.lib.loader.isInitial
-import com.sd.lib.loader.isSuccess
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -24,10 +20,8 @@ class PageLoaderTest {
             assertEquals(null, pageSize)
             assertEquals(false, isRefreshing)
             assertEquals(false, isLoadingMore)
-            testExtResult(LoaderResultState.Initial)
         }
     }
-
 
     @Test
     fun `test refresh success`(): Unit = runBlocking {
@@ -53,7 +47,6 @@ class PageLoaderTest {
             assertEquals(2, pageSize)
             assertEquals(false, isRefreshing)
             assertEquals(false, isLoadingMore)
-            testExtResult(LoaderResultState.Success)
         }
     }
 
@@ -78,7 +71,6 @@ class PageLoaderTest {
             assertEquals(null, pageSize)
             assertEquals(false, isRefreshing)
             assertEquals(false, isLoadingMore)
-            testExtResult(LoaderResultState.Failure)
         }
     }
 
@@ -109,7 +101,6 @@ class PageLoaderTest {
             assertEquals(null, pageSize)
             assertEquals(true, isRefreshing)
             assertEquals(false, isLoadingMore)
-            testExtResult(LoaderResultState.Initial)
         }
 
         loader.cancelRefresh()
@@ -120,7 +111,6 @@ class PageLoaderTest {
             assertEquals(null, pageSize)
             assertEquals(false, isRefreshing)
             assertEquals(false, isLoadingMore)
-            testExtResult(LoaderResultState.Initial)
         }
     }
 
@@ -151,7 +141,6 @@ class PageLoaderTest {
             assertEquals(null, pageSize)
             assertEquals(true, isRefreshing)
             assertEquals(false, isLoadingMore)
-            testExtResult(LoaderResultState.Initial)
         }
 
         loader.refresh { listOf(3, 4) }
@@ -162,7 +151,6 @@ class PageLoaderTest {
             assertEquals(2, pageSize)
             assertEquals(false, isRefreshing)
             assertEquals(false, isLoadingMore)
-            testExtResult(LoaderResultState.Success)
         }
     }
 
@@ -193,7 +181,6 @@ class PageLoaderTest {
             assertEquals(null, pageSize)
             assertEquals(false, isRefreshing)
             assertEquals(true, isLoadingMore)
-            testExtResult(LoaderResultState.Initial)
         }
 
         loader.refresh { listOf(3, 4) }
@@ -204,7 +191,6 @@ class PageLoaderTest {
             assertEquals(2, pageSize)
             assertEquals(false, isRefreshing)
             assertEquals(false, isLoadingMore)
-            testExtResult(LoaderResultState.Success)
         }
     }
 
@@ -310,7 +296,6 @@ class PageLoaderTest {
             assertEquals(2, pageSize)
             assertEquals(false, isRefreshing)
             assertEquals(false, isLoadingMore)
-            testExtResult(LoaderResultState.Success)
         }
 
         // 2
@@ -328,7 +313,6 @@ class PageLoaderTest {
             assertEquals(2, pageSize)
             assertEquals(false, isRefreshing)
             assertEquals(false, isLoadingMore)
-            testExtResult(LoaderResultState.Success)
         }
 
         // 3 空数据
@@ -346,7 +330,6 @@ class PageLoaderTest {
             assertEquals(0, pageSize)
             assertEquals(false, isRefreshing)
             assertEquals(false, isLoadingMore)
-            testExtResult(LoaderResultState.Success)
         }
 
         // 4
@@ -365,7 +348,6 @@ class PageLoaderTest {
             assertEquals(0, pageSize)
             assertEquals(false, isRefreshing)
             assertEquals(false, isLoadingMore)
-            testExtResult(LoaderResultState.Success)
         }
     }
 
@@ -390,7 +372,6 @@ class PageLoaderTest {
             assertEquals(null, pageSize)
             assertEquals(false, isRefreshing)
             assertEquals(false, isLoadingMore)
-            testExtResult(LoaderResultState.Failure)
         }
     }
 
@@ -421,7 +402,6 @@ class PageLoaderTest {
             assertEquals(null, pageSize)
             assertEquals(false, isRefreshing)
             assertEquals(true, isLoadingMore)
-            testExtResult(LoaderResultState.Initial)
         }
 
         loader.cancelLoadMore()
@@ -432,7 +412,6 @@ class PageLoaderTest {
             assertEquals(null, pageSize)
             assertEquals(false, isRefreshing)
             assertEquals(false, isLoadingMore)
-            testExtResult(LoaderResultState.Initial)
         }
     }
 
@@ -463,7 +442,6 @@ class PageLoaderTest {
             assertEquals(null, pageSize)
             assertEquals(false, isRefreshing)
             assertEquals(true, isLoadingMore)
-            testExtResult(LoaderResultState.Initial)
         }
 
         try {
@@ -482,7 +460,6 @@ class PageLoaderTest {
             assertEquals(2, pageSize)
             assertEquals(false, isRefreshing)
             assertEquals(false, isLoadingMore)
-            testExtResult(LoaderResultState.Success)
         }
     }
 
@@ -513,7 +490,6 @@ class PageLoaderTest {
             assertEquals(null, pageSize)
             assertEquals(true, isRefreshing)
             assertEquals(false, isLoadingMore)
-            testExtResult(LoaderResultState.Initial)
         }
 
         try {
@@ -532,7 +508,6 @@ class PageLoaderTest {
             assertEquals(2, pageSize)
             assertEquals(false, isRefreshing)
             assertEquals(false, isLoadingMore)
-            testExtResult(LoaderResultState.Success)
         }
     }
 
@@ -609,28 +584,6 @@ class PageLoaderTest {
                 assertEquals(false, isRefreshing)
                 assertEquals(false, isLoadingMore)
             }
-        }
-    }
-}
-
-private fun PageState<*>.testExtResult(state: LoaderResultState) {
-    when (state) {
-        LoaderResultState.Initial -> {
-            assertEquals(true, isInitial)
-            assertEquals(false, isSuccess)
-            assertEquals(false, isFailure)
-        }
-
-        LoaderResultState.Success -> {
-            assertEquals(false, isInitial)
-            assertEquals(true, isSuccess)
-            assertEquals(false, isFailure)
-        }
-
-        LoaderResultState.Failure -> {
-            assertEquals(false, isInitial)
-            assertEquals(false, isSuccess)
-            assertEquals(true, isFailure)
         }
     }
 }

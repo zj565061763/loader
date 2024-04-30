@@ -107,23 +107,14 @@ data class PageState<T>(
     val isLoadingMore: Boolean = false,
 )
 
-/** 是否初始状态 */
-val PageState<*>.isInitial: Boolean get() = result == null
-
-/** 是否成功状态(最后一次加载的结果) */
-val PageState<*>.isSuccess: Boolean get() = result?.isSuccess == true
-
-/** 是否失败状态(最后一次加载的结果) */
-val PageState<*>.isFailure: Boolean get() = result?.isFailure == true
-
 /** 是否显示没有更多数据 */
 val PageState<*>.showNoMoreData: Boolean get() = data.isNotEmpty() && pageSize == 0
 
 /** 是否显示加载数据为空 */
-val PageState<*>.showLoadEmpty: Boolean get() = isSuccess && data.isEmpty()
+val PageState<*>.showLoadEmpty: Boolean get() = data.isEmpty() && result?.isSuccess == true
 
 /** 是否显示加载数据失败 */
-val PageState<*>.showLoadFailure: Boolean get() = isFailure && data.isEmpty()
+val PageState<*>.showLoadFailure: Boolean get() = data.isEmpty() && result?.isFailure == true
 
 //-------------------- impl --------------------
 
