@@ -3,11 +3,9 @@ package com.sd.lib.loader
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
-import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.distinctUntilChanged
-import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
 
 interface FDataLoader<T> {
@@ -16,10 +14,7 @@ interface FDataLoader<T> {
     val state: DataState<T>
 
     /** 状态流 */
-    val stateFlow: Flow<DataState<T>>
-
-    /** 数据流 */
-    val dataFlow: Flow<T>
+    val stateFlow: StateFlow<DataState<T>>
 
     /**
      * 开始加载，如果上一次加载还未完成，再次调用此方法，会取消上一次加载([CancellationException])。
@@ -84,18 +79,15 @@ private class DataLoaderImpl<T>(initial: T) : FDataLoader<T>, FDataLoader.LoadSc
     override val state: DataState<T>
         get() = _state.value
 
-    override val stateFlow: Flow<DataState<T>>
+    override val stateFlow: StateFlow<DataState<T>>
         get() = _state.asStateFlow()
-
-    override val dataFlow: Flow<T>
-        get() = _state.map { it.data }.distinctUntilChanged()
 
     override val currentState: DataState<T>
         get() = _state.value
 
     override suspend fun load(
         notifyLoading: Boolean,
-        onLoad: suspend FDataLoader.LoadScope<T>.() -> T
+        onLoad: suspend FDataLoader.LoadScope<T>.() -> T,
     ): Result<T> {
         return _loader.load(
             onFinish = {
