@@ -74,7 +74,7 @@ val DataState<*>.isFailure: Boolean get() = result?.isFailure == true
 private class DataLoaderImpl<T>(initial: T) : FDataLoader<T>, FDataLoader.LoadScope<T> {
 
     private val _loader = FLoader()
-    private val _state: MutableStateFlow<DataState<T>> = MutableStateFlow(DataState(data = initial))
+    private val _state = MutableStateFlow(DataState(data = initial))
 
     override val state: DataState<T>
         get() = _state.value
