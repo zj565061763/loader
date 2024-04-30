@@ -10,7 +10,7 @@ import java.util.concurrent.atomic.AtomicReference
 interface FLoader {
     /**
      * 开始加载，如果上一次加载还未完成，再次调用此方法，会取消上一次加载([CancellationException])，
-     * 如果[onLoad]触发了，则[onFinish]一定会触发，[onLoad]的异常会被捕获，除了[CancellationException]。
+     * 如果[onLoad]触发了，则[onFinish]一定会触发，[onLoad]的异常会被捕获，除了[CancellationException]
      *
      * @param onFinish 结束回调
      * @param onLoad 加载回调
@@ -22,7 +22,7 @@ interface FLoader {
 
     /**
      * 开始加载，如果上一次加载还未完成，再次调用此方法，会取消上一次加载([CancellationException])，
-     * 如果[onLoad]触发了，则[onFinish]一定会触发，[onLoad]的异常会被抛出。
+     * 如果[onLoad]触发了，则[onFinish]一定会触发，[onLoad]的异常会被抛出
      *
      * @param onFinish 结束回调
      * @param onLoad 加载回调
