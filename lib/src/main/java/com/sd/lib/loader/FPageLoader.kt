@@ -58,7 +58,8 @@ interface FPageLoader<T> {
         val currentState: PageState<T>
 
         /** 刷新数据的页码，例如数据源页码从1开始，那么[refreshPage]就为1 */
-        val refreshPage: Int get() = currentState.refreshPage
+        val refreshPage: Int
+            get() = currentState.refreshPage
     }
 }
 
