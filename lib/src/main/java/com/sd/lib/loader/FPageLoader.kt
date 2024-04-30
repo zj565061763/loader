@@ -2,8 +2,8 @@ package com.sd.lib.loader
 
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
-import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlin.coroutines.cancellation.CancellationException
@@ -14,7 +14,7 @@ interface FPageLoader<T> {
     val state: PageState<T>
 
     /** 状态流 */
-    val stateFlow: Flow<PageState<T>>
+    val stateFlow: StateFlow<PageState<T>>
 
     /**
      * 刷新，会取消正在刷新或者正在加载更多的任务
@@ -136,7 +136,7 @@ private class PageLoaderImpl<T>(
     private val _refreshLoader = FLoader()
     private val _loadMoreLoader = FLoader()
 
-    private val _state: MutableStateFlow<PageState<T>> = MutableStateFlow(
+    private val _state = MutableStateFlow(
         PageState(
             data = initial,
             refreshPage = refreshPage,
@@ -146,7 +146,7 @@ private class PageLoaderImpl<T>(
     override val state: PageState<T>
         get() = _state.value
 
-    override val stateFlow: Flow<PageState<T>>
+    override val stateFlow: StateFlow<PageState<T>>
         get() = _state.asStateFlow()
 
     override val currentState: PageState<T>
