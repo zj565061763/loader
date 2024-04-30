@@ -1,11 +1,7 @@
 package com.sd.demo.loader
 
 import app.cash.turbine.test
-import com.sd.lib.loader.DataState
 import com.sd.lib.loader.FDataLoader
-import com.sd.lib.loader.isFailure
-import com.sd.lib.loader.isInitial
-import com.sd.lib.loader.isSuccess
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
@@ -19,7 +15,6 @@ class DataLoaderTest {
             assertEquals(0, data)
             assertEquals(null, result)
             assertEquals(false, isLoading)
-            testExtResult(LoaderResultState.Initial)
         }
     }
 
@@ -34,7 +29,6 @@ class DataLoaderTest {
             assertEquals(1, data)
             assertEquals(Result.success(Unit), result)
             assertEquals(false, isLoading)
-            testExtResult(LoaderResultState.Success)
         }
     }
 
@@ -50,7 +44,6 @@ class DataLoaderTest {
             assertEquals(true, result!!.isFailure)
             assertEquals("failure", result!!.exceptionOrNull()!!.message)
             assertEquals(false, isLoading)
-            testExtResult(LoaderResultState.Failure)
         }
     }
 
@@ -172,28 +165,6 @@ class DataLoaderTest {
                 assertEquals(Result.success(Unit), result)
                 assertEquals(false, isLoading)
             }
-        }
-    }
-}
-
-private fun DataState<*>.testExtResult(state: LoaderResultState) {
-    when (state) {
-        LoaderResultState.Initial -> {
-            assertEquals(true, isInitial)
-            assertEquals(false, isSuccess)
-            assertEquals(false, isFailure)
-        }
-
-        LoaderResultState.Success -> {
-            assertEquals(false, isInitial)
-            assertEquals(true, isSuccess)
-            assertEquals(false, isFailure)
-        }
-
-        LoaderResultState.Failure -> {
-            assertEquals(false, isInitial)
-            assertEquals(false, isSuccess)
-            assertEquals(true, isFailure)
         }
     }
 }

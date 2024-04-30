@@ -60,14 +60,32 @@ data class DataState<T>(
     val isLoading: Boolean = false,
 )
 
-/** 是否初始状态 */
-val DataState<*>.isInitial: Boolean get() = result == null
+/**
+ * 初始状态时触发[block]
+ */
+inline fun <T> DataState<T>.onInitial(block: DataState<T>.() -> Unit) {
+    if (result == null) {
+        block()
+    }
+}
 
-/** 是否成功状态(最后一次加载的结果) */
-val DataState<*>.isSuccess: Boolean get() = result?.isSuccess == true
+/**
+ * 成功状态时触发[block]
+ */
+inline fun <T> DataState<T>.onSuccess(block: DataState<T>.() -> Unit) {
+    result?.onSuccess {
+        block()
+    }
+}
 
-/** 是否失败状态(最后一次加载的结果) */
-val DataState<*>.isFailure: Boolean get() = result?.isFailure == true
+/**
+ * 成功状态时触发[block]
+ */
+inline fun <T> DataState<T>.onFailure(block: DataState<T>.(Throwable) -> Unit) {
+    result?.onFailure {
+        block(it)
+    }
+}
 
 //-------------------- impl --------------------
 
