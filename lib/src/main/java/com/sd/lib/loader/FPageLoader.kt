@@ -28,7 +28,7 @@ interface FPageLoader<T> {
     ): Result<List<T>>
 
     /**
-     * 加载更多
+     * 加载更多，如果当前正在刷新或者正在加载更多，则调用此方法会抛出[CancellationException]取消异常
      *
      * @param notifyLoading 是否通知[PageState.isLoadingMore]
      * @param onLoad 加载回调
