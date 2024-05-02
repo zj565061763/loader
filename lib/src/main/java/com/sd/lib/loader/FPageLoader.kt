@@ -17,7 +17,7 @@ interface FPageLoader<T> {
     val stateFlow: StateFlow<PageState<T>>
 
     /**
-     * 刷新，会取消正在刷新或者正在加载更多的任务
+     * 刷新，如果当前正在刷新或者正在加载更多，会被取消
      *
      * @param notifyLoading 是否通知[PageState.isRefreshing]
      * @param onLoad 加载回调
@@ -28,12 +28,12 @@ interface FPageLoader<T> {
     ): Result<List<T>>
 
     /**
-     * 加载更多，如果当前正在刷新或者正在加载更多，则调用此方法会抛出[CancellationException]取消异常
+     * 加载更多，如果当前正在刷新或者正在加载更多，会抛出[CancellationException]取消异常
      *
-     * @param notifyLoading 是否通知[PageState.isLoadingMore]
+     * @param notifyLoading 是否通知[PageState.isAppending]
      * @param onLoad 加载回调
      */
-    suspend fun loadMore(
+    suspend fun append(
         notifyLoading: Boolean = true,
         onLoad: suspend LoadScope<T>.(page: Int) -> List<T>,
     ): Result<List<T>>
@@ -46,7 +46,7 @@ interface FPageLoader<T> {
     /**
      * 取消加载更多
      */
-    suspend fun cancelLoadMore()
+    suspend fun cancelAppend()
 
     /**
      * 设置数据
@@ -104,7 +104,7 @@ data class PageState<T>(
     val isRefreshing: Boolean = false,
 
     /** 是否正在加载更多 */
-    val isLoadingMore: Boolean = false,
+    val isAppending: Boolean = false,
 )
 
 /** 是否显示没有更多数据 */
@@ -125,7 +125,7 @@ private class PageLoaderImpl<T>(
 ) : FPageLoader<T>, FPageLoader.LoadScope<T> {
 
     private val _refreshLoader = FLoader()
-    private val _loadMoreLoader = FLoader()
+    private val _appendLoader = FLoader()
 
     private val _state = MutableStateFlow(
         PageState(
@@ -155,7 +155,7 @@ private class PageLoaderImpl<T>(
             },
             onLoad = {
                 // 取消加载更多
-                cancelLoadMore()
+                cancelAppend()
 
                 if (notifyLoading) {
                     _state.update { it.copy(isRefreshing = true) }
@@ -181,26 +181,26 @@ private class PageLoaderImpl<T>(
         )
     }
 
-    override suspend fun loadMore(
+    override suspend fun append(
         notifyLoading: Boolean,
         onLoad: suspend FPageLoader.LoadScope<T>.(page: Int) -> List<T>,
     ): Result<List<T>> {
-        if (state.isRefreshing || state.isLoadingMore) {
-            throw LoadMoreCancellationException()
+        if (state.isRefreshing || state.isAppending) {
+            throw AppendCancellationException()
         }
 
-        return _loadMoreLoader.load(
+        return _appendLoader.load(
             onFinish = {
                 if (notifyLoading) {
-                    _state.update { it.copy(isLoadingMore = false) }
+                    _state.update { it.copy(isAppending = false) }
                 }
             },
             onLoad = {
                 if (notifyLoading) {
-                    _state.update { it.copy(isLoadingMore = true) }
+                    _state.update { it.copy(isAppending = true) }
                 }
 
-                val page = getLoadMorePage()
+                val page = getAppendPage()
 
                 try {
                     onLoad(page).also { data ->
@@ -224,8 +224,8 @@ private class PageLoaderImpl<T>(
         _refreshLoader.cancelLoad()
     }
 
-    override suspend fun cancelLoadMore() {
-        _loadMoreLoader.cancelLoad()
+    override suspend fun cancelAppend() {
+        _appendLoader.cancelLoad()
     }
 
     override fun setData(data: List<T>) {
@@ -234,7 +234,7 @@ private class PageLoaderImpl<T>(
         }
     }
 
-    private fun getLoadMorePage(): Int {
+    private fun getAppendPage(): Int {
         if (state.data.isEmpty()) return state.refreshPage
         val lastPage = state.page ?: return state.refreshPage
         return if (state.pageSize!! <= 0) lastPage else lastPage + 1
@@ -256,7 +256,7 @@ private class PageLoaderImpl<T>(
     }
 }
 
-private class LoadMoreCancellationException : CancellationException("loadMore cancellation") {
+private class AppendCancellationException : CancellationException("Append cancellation") {
     override fun fillInStackTrace(): Throwable {
         stackTrace = emptyArray()
         return this

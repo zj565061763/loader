@@ -19,7 +19,7 @@ class PageLoaderTest {
             assertEquals(null, page)
             assertEquals(null, pageSize)
             assertEquals(false, isRefreshing)
-            assertEquals(false, isLoadingMore)
+            assertEquals(false, isAppending)
         }
     }
 
@@ -46,7 +46,7 @@ class PageLoaderTest {
             assertEquals(refreshPage, page)
             assertEquals(2, pageSize)
             assertEquals(false, isRefreshing)
-            assertEquals(false, isLoadingMore)
+            assertEquals(false, isAppending)
         }
     }
 
@@ -70,7 +70,7 @@ class PageLoaderTest {
             assertEquals(null, page)
             assertEquals(null, pageSize)
             assertEquals(false, isRefreshing)
-            assertEquals(false, isLoadingMore)
+            assertEquals(false, isAppending)
         }
     }
 
@@ -100,7 +100,7 @@ class PageLoaderTest {
             assertEquals(null, page)
             assertEquals(null, pageSize)
             assertEquals(true, isRefreshing)
-            assertEquals(false, isLoadingMore)
+            assertEquals(false, isAppending)
         }
 
         loader.cancelRefresh()
@@ -110,7 +110,7 @@ class PageLoaderTest {
             assertEquals(null, page)
             assertEquals(null, pageSize)
             assertEquals(false, isRefreshing)
-            assertEquals(false, isLoadingMore)
+            assertEquals(false, isAppending)
         }
     }
 
@@ -140,7 +140,7 @@ class PageLoaderTest {
             assertEquals(null, page)
             assertEquals(null, pageSize)
             assertEquals(true, isRefreshing)
-            assertEquals(false, isLoadingMore)
+            assertEquals(false, isAppending)
         }
 
         loader.refresh { listOf(3, 4) }
@@ -150,7 +150,7 @@ class PageLoaderTest {
             assertEquals(refreshPage, page)
             assertEquals(2, pageSize)
             assertEquals(false, isRefreshing)
-            assertEquals(false, isLoadingMore)
+            assertEquals(false, isAppending)
         }
     }
 
@@ -166,7 +166,7 @@ class PageLoaderTest {
 
         val loading = TestContinuation()
         launch {
-            loader.loadMore {
+            loader.append {
                 loading.resume()
                 delay(Long.MAX_VALUE)
                 listOf(1, 2)
@@ -180,7 +180,7 @@ class PageLoaderTest {
             assertEquals(null, page)
             assertEquals(null, pageSize)
             assertEquals(false, isRefreshing)
-            assertEquals(true, isLoadingMore)
+            assertEquals(true, isAppending)
         }
 
         loader.refresh { listOf(3, 4) }
@@ -190,7 +190,7 @@ class PageLoaderTest {
             assertEquals(refreshPage, page)
             assertEquals(2, pageSize)
             assertEquals(false, isRefreshing)
-            assertEquals(false, isLoadingMore)
+            assertEquals(false, isAppending)
         }
     }
 
@@ -238,7 +238,7 @@ class PageLoaderTest {
                 assertEquals(null, page)
                 assertEquals(null, pageSize)
                 assertEquals(false, isRefreshing)
-                assertEquals(false, isLoadingMore)
+                assertEquals(false, isAppending)
             }
 
             loader.refresh { listOf(3, 4) }
@@ -249,7 +249,7 @@ class PageLoaderTest {
                 assertEquals(null, page)
                 assertEquals(null, pageSize)
                 assertEquals(true, isRefreshing)
-                assertEquals(false, isLoadingMore)
+                assertEquals(false, isAppending)
             }
             awaitItem().run {
                 assertEquals(listOf(3, 4), data)
@@ -257,7 +257,7 @@ class PageLoaderTest {
                 assertEquals(refreshPage, page)
                 assertEquals(2, pageSize)
                 assertEquals(true, isRefreshing)
-                assertEquals(false, isLoadingMore)
+                assertEquals(false, isAppending)
             }
             awaitItem().run {
                 assertEquals(listOf(3, 4), data)
@@ -265,7 +265,7 @@ class PageLoaderTest {
                 assertEquals(refreshPage, page)
                 assertEquals(2, pageSize)
                 assertEquals(false, isRefreshing)
-                assertEquals(false, isLoadingMore)
+                assertEquals(false, isAppending)
             }
         }
     }
@@ -282,7 +282,7 @@ class PageLoaderTest {
         }
 
         // 1
-        loader.loadMore { page ->
+        loader.append { page ->
             assertEquals(refreshPage, page)
             listOf(1, 2)
         }.let { result ->
@@ -295,11 +295,11 @@ class PageLoaderTest {
             assertEquals(refreshPage, page)
             assertEquals(2, pageSize)
             assertEquals(false, isRefreshing)
-            assertEquals(false, isLoadingMore)
+            assertEquals(false, isAppending)
         }
 
         // 2
-        loader.loadMore { page ->
+        loader.append { page ->
             assertEquals(refreshPage + 1, page)
             listOf(3, 4)
         }.let { result ->
@@ -312,11 +312,11 @@ class PageLoaderTest {
             assertEquals(refreshPage + 1, page)
             assertEquals(2, pageSize)
             assertEquals(false, isRefreshing)
-            assertEquals(false, isLoadingMore)
+            assertEquals(false, isAppending)
         }
 
         // 3 空数据
-        loader.loadMore { page ->
+        loader.append { page ->
             assertEquals(refreshPage + 2, page)
             emptyList()
         }.let { result ->
@@ -329,11 +329,11 @@ class PageLoaderTest {
             assertEquals(refreshPage + 2, page)
             assertEquals(0, pageSize)
             assertEquals(false, isRefreshing)
-            assertEquals(false, isLoadingMore)
+            assertEquals(false, isAppending)
         }
 
         // 4
-        loader.loadMore { page ->
+        loader.append { page ->
             // 由于上一次加载的是空数据，所以此次的page和上一次应该一样
             assertEquals(refreshPage + 2, page)
             emptyList()
@@ -347,7 +347,7 @@ class PageLoaderTest {
             assertEquals(refreshPage + 2, page)
             assertEquals(0, pageSize)
             assertEquals(false, isRefreshing)
-            assertEquals(false, isLoadingMore)
+            assertEquals(false, isAppending)
         }
     }
 
@@ -361,7 +361,7 @@ class PageLoaderTest {
             }
         }
 
-        loader.loadMore { error("failure") }.let { result ->
+        loader.append { error("failure") }.let { result ->
             assertEquals(true, result.isFailure)
             assertEquals("failure", result.exceptionOrNull()!!.message)
         }
@@ -371,7 +371,7 @@ class PageLoaderTest {
             assertEquals(null, page)
             assertEquals(null, pageSize)
             assertEquals(false, isRefreshing)
-            assertEquals(false, isLoadingMore)
+            assertEquals(false, isAppending)
         }
     }
 
@@ -387,7 +387,7 @@ class PageLoaderTest {
 
         val loading = TestContinuation()
         launch {
-            loader.loadMore {
+            loader.append {
                 loading.resume()
                 delay(Long.MAX_VALUE)
                 listOf(1, 2)
@@ -401,17 +401,17 @@ class PageLoaderTest {
             assertEquals(null, page)
             assertEquals(null, pageSize)
             assertEquals(false, isRefreshing)
-            assertEquals(true, isLoadingMore)
+            assertEquals(true, isAppending)
         }
 
-        loader.cancelLoadMore()
+        loader.cancelAppend()
         loader.state.run {
             assertEquals(emptyList<Int>(), data)
             assertEquals(null, result)
             assertEquals(null, page)
             assertEquals(null, pageSize)
             assertEquals(false, isRefreshing)
-            assertEquals(false, isLoadingMore)
+            assertEquals(false, isAppending)
         }
     }
 
@@ -427,7 +427,7 @@ class PageLoaderTest {
 
         val loading = TestContinuation()
         val loadJob = launch {
-            loader.loadMore {
+            loader.append {
                 loading.resume()
                 delay(1_000)
                 listOf(1, 2)
@@ -441,11 +441,11 @@ class PageLoaderTest {
             assertEquals(null, page)
             assertEquals(null, pageSize)
             assertEquals(false, isRefreshing)
-            assertEquals(true, isLoadingMore)
+            assertEquals(true, isAppending)
         }
 
         try {
-            loader.loadMore { listOf(3, 4) }
+            loader.append { listOf(3, 4) }
         } catch (e: CancellationException) {
             Result.failure(e)
         }.let { result ->
@@ -459,7 +459,7 @@ class PageLoaderTest {
             assertEquals(refreshPage, page)
             assertEquals(2, pageSize)
             assertEquals(false, isRefreshing)
-            assertEquals(false, isLoadingMore)
+            assertEquals(false, isAppending)
         }
     }
 
@@ -489,11 +489,11 @@ class PageLoaderTest {
             assertEquals(null, page)
             assertEquals(null, pageSize)
             assertEquals(true, isRefreshing)
-            assertEquals(false, isLoadingMore)
+            assertEquals(false, isAppending)
         }
 
         try {
-            loader.loadMore { listOf(3, 4) }
+            loader.append { listOf(3, 4) }
         } catch (e: CancellationException) {
             Result.failure(e)
         }.let { result ->
@@ -507,7 +507,7 @@ class PageLoaderTest {
             assertEquals(refreshPage, page)
             assertEquals(2, pageSize)
             assertEquals(false, isRefreshing)
-            assertEquals(false, isLoadingMore)
+            assertEquals(false, isAppending)
         }
     }
 
@@ -515,12 +515,12 @@ class PageLoaderTest {
     fun `test loadMore notify loading`(): Unit = runBlocking {
         val loader = FPageLoader<Int> { page, pageData -> null }
         loader.state.run {
-            assertEquals(false, isLoadingMore)
+            assertEquals(false, isAppending)
         }
 
         val loading = TestContinuation()
         launch {
-            loader.loadMore(notifyLoading = false) {
+            loader.append(notifyLoading = false) {
                 loading.resume()
                 delay(Long.MAX_VALUE)
                 listOf(1, 2)
@@ -529,12 +529,12 @@ class PageLoaderTest {
 
         loading.await()
         loader.state.run {
-            assertEquals(false, isLoadingMore)
+            assertEquals(false, isAppending)
         }
 
-        loader.loadMore(notifyLoading = false) { error("failure") }
+        loader.append(notifyLoading = false) { error("failure") }
         loader.state.run {
-            assertEquals(false, isLoadingMore)
+            assertEquals(false, isAppending)
         }
     }
 
@@ -555,10 +555,10 @@ class PageLoaderTest {
                 assertEquals(null, page)
                 assertEquals(null, pageSize)
                 assertEquals(false, isRefreshing)
-                assertEquals(false, isLoadingMore)
+                assertEquals(false, isAppending)
             }
 
-            loader.loadMore { listOf(3, 4) }
+            loader.append { listOf(3, 4) }
 
             awaitItem().run {
                 assertEquals(emptyList<Int>(), data)
@@ -566,7 +566,7 @@ class PageLoaderTest {
                 assertEquals(null, page)
                 assertEquals(null, pageSize)
                 assertEquals(false, isRefreshing)
-                assertEquals(true, isLoadingMore)
+                assertEquals(true, isAppending)
             }
             awaitItem().run {
                 assertEquals(listOf(3, 4), data)
@@ -574,7 +574,7 @@ class PageLoaderTest {
                 assertEquals(refreshPage, page)
                 assertEquals(2, pageSize)
                 assertEquals(false, isRefreshing)
-                assertEquals(true, isLoadingMore)
+                assertEquals(true, isAppending)
             }
             awaitItem().run {
                 assertEquals(listOf(3, 4), data)
@@ -582,7 +582,7 @@ class PageLoaderTest {
                 assertEquals(refreshPage, page)
                 assertEquals(2, pageSize)
                 assertEquals(false, isRefreshing)
-                assertEquals(false, isLoadingMore)
+                assertEquals(false, isAppending)
             }
         }
     }
