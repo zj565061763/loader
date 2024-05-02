@@ -155,7 +155,7 @@ class PageLoaderTest {
     }
 
     @Test
-    fun `test refresh when loadingMore`(): Unit = runBlocking {
+    fun `test refresh when appending`(): Unit = runBlocking {
         val list = mutableListOf<Int>()
         val loader = FPageLoader { page, pageData ->
             list.apply {
@@ -272,7 +272,7 @@ class PageLoaderTest {
 
 
     @Test
-    fun `test loadMore success`(): Unit = runBlocking {
+    fun `test append success`(): Unit = runBlocking {
         val list = mutableListOf<Int>()
         val loader = FPageLoader { page, pageData ->
             list.apply {
@@ -352,7 +352,7 @@ class PageLoaderTest {
     }
 
     @Test
-    fun `test loadMore failure`(): Unit = runBlocking {
+    fun `test append failure`(): Unit = runBlocking {
         val list = mutableListOf<Int>()
         val loader = FPageLoader { page, pageData ->
             list.apply {
@@ -376,7 +376,7 @@ class PageLoaderTest {
     }
 
     @Test
-    fun `test loadMore cancel`(): Unit = runBlocking {
+    fun `test append cancel`(): Unit = runBlocking {
         val list = mutableListOf<Int>()
         val loader = FPageLoader { page, pageData ->
             list.apply {
@@ -416,7 +416,7 @@ class PageLoaderTest {
     }
 
     @Test
-    fun `test loadMore when loadingMore`(): Unit = runBlocking {
+    fun `test append when appending`(): Unit = runBlocking {
         val list = mutableListOf<Int>()
         val loader = FPageLoader { page, pageData ->
             list.apply {
@@ -464,7 +464,7 @@ class PageLoaderTest {
     }
 
     @Test
-    fun `test loadMore when refreshing`(): Unit = runBlocking {
+    fun `test append when refreshing`(): Unit = runBlocking {
         val list = mutableListOf<Int>()
         val loader = FPageLoader { page, pageData ->
             list.apply {
@@ -512,7 +512,7 @@ class PageLoaderTest {
     }
 
     @Test
-    fun `test loadMore notify loading`(): Unit = runBlocking {
+    fun `test append notify loading`(): Unit = runBlocking {
         val loader = FPageLoader<Int> { page, pageData -> null }
         loader.state.run {
             assertEquals(false, isAppending)
@@ -539,7 +539,7 @@ class PageLoaderTest {
     }
 
     @Test
-    fun `test loadMore flow`(): Unit = runBlocking {
+    fun `test append flow`(): Unit = runBlocking {
         val list = mutableListOf<Int>()
         val loader = FPageLoader { page, pageData ->
             list.apply {
