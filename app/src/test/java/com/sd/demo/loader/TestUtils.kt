@@ -4,12 +4,6 @@ import kotlinx.coroutines.CancellableContinuation
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlin.coroutines.resume
 
-enum class LoaderResultState {
-    Initial,
-    Success,
-    Failure,
-}
-
 class TestContinuation {
     private var _result: Unit? = null
     private val _holder: MutableSet<CancellableContinuation<Unit>> = mutableSetOf()
