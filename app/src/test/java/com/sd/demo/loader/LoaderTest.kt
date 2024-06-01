@@ -10,6 +10,26 @@ import org.junit.Test
 class LoaderTest {
 
     @Test
+    fun `test loading`(): Unit = runBlocking {
+        val loader = FLoader()
+
+        val testContinuation = TestContinuation()
+
+        launch {
+            loader.load {
+                testContinuation.resume()
+                delay(Long.MAX_VALUE)
+            }
+        }
+
+        testContinuation.await()
+        assertEquals(true, loader.isLoading())
+
+        loader.cancelLoad()
+        assertEquals(false, loader.isLoading())
+    }
+
+    @Test
     fun `test loadOrThrow`(): Unit = runBlocking {
         val loader = FLoader()
         assertEquals(1, loader.loadOrThrow { 1 })

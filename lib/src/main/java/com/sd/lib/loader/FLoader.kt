@@ -9,6 +9,11 @@ import java.util.concurrent.atomic.AtomicReference
 
 interface FLoader {
     /**
+     * 是否正在加载中
+     */
+    fun isLoading(): Boolean
+
+    /**
      * 开始加载，如果上一次加载还未完成，再次调用此方法，会取消上一次加载([CancellationException])，
      * 如果[onLoad]触发了，则[onFinish]一定会触发，[onLoad]的异常会被捕获，除了[CancellationException]
      *
@@ -48,6 +53,10 @@ fun FLoader(): FLoader = LoaderImpl()
 private class LoaderImpl : FLoader {
 
     private val _mutator = FMutator()
+
+    override fun isLoading(): Boolean {
+        return _mutator.isMutating()
+    }
 
     override suspend fun <T> load(
         onFinish: () -> Unit,
@@ -109,7 +118,7 @@ private class FMutator {
 
     suspend fun <R> mutate(
         priority: Int = 0,
-        block: suspend () -> R
+        block: suspend () -> R,
     ) = coroutineScope {
         val mutator = Mutator(priority, coroutineContext[Job]!!)
 
@@ -125,6 +134,8 @@ private class FMutator {
     }
 
     //-------------------- ext --------------------
+
+    fun isMutating(): Boolean = currentMutator.get() != null
 
     suspend fun cancelAndJoin() {
         while (true) {
