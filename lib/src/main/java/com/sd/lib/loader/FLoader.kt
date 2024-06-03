@@ -26,18 +26,6 @@ interface FLoader {
     ): Result<T>
 
     /**
-     * 开始加载，如果上一次加载还未完成，再次调用此方法，会取消上一次加载([CancellationException])，
-     * 如果[onLoad]触发了，则[onFinish]一定会触发，[onLoad]的异常会被抛出
-     *
-     * @param onFinish 结束回调
-     * @param onLoad 加载回调
-     */
-    suspend fun <T> loadOrThrow(
-        onFinish: () -> Unit = {},
-        onLoad: suspend () -> T,
-    ): T
-
-    /**
      * 取消加载
      */
     suspend fun cancelLoad()
@@ -62,25 +50,12 @@ private class LoaderImpl : FLoader {
         onFinish: () -> Unit,
         onLoad: suspend () -> T,
     ): Result<T> {
-        return loadOrThrow(onFinish = onFinish) {
+        return _mutator.mutate {
             try {
-                onLoad().let { data ->
-                    Result.success(data)
-                }
+                onLoad().let { Result.success(it) }
             } catch (e: Throwable) {
                 if (e is CancellationException) throw e
                 Result.failure(e)
-            }
-        }
-    }
-
-    override suspend fun <T> loadOrThrow(
-        onFinish: () -> Unit,
-        onLoad: suspend () -> T,
-    ): T {
-        return _mutator.mutate {
-            try {
-                onLoad()
             } finally {
                 onFinish()
             }
