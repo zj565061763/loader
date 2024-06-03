@@ -3,6 +3,8 @@ package com.sd.lib.loader
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import java.util.concurrent.atomic.AtomicReference
@@ -52,7 +54,10 @@ private class LoaderImpl : FLoader {
     ): Result<T> {
         return _mutator.mutate {
             try {
-                onLoad().let { Result.success(it) }
+                onLoad().let { data ->
+                    currentCoroutineContext().ensureActive()
+                    Result.success(data)
+                }
             } catch (e: Throwable) {
                 if (e is CancellationException) throw e
                 Result.failure(e)
