@@ -5,11 +5,22 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import java.util.concurrent.atomic.AtomicReference
 
 interface FLoader {
+
+    /** 状态 */
+    val state: LoaderState
+
+    /** 状态流 */
+    val stateFlow: StateFlow<LoaderState>
+
     /**
      * 是否正在加载中
      */
@@ -38,14 +49,28 @@ interface FLoader {
  */
 fun FLoader(): FLoader = LoaderImpl()
 
+//-------------------- state --------------------
+
+data class LoaderState(
+    /** 是否正在加载中 */
+    val isLoading: Boolean = false,
+)
+
 //-------------------- impl --------------------
 
 private class LoaderImpl : FLoader {
 
     private val _mutator = FMutator()
+    private val _state = MutableStateFlow(LoaderState())
+
+    override val state: LoaderState
+        get() = _state.value
+
+    override val stateFlow: StateFlow<LoaderState>
+        get() = _state.asStateFlow()
 
     override fun isLoading(): Boolean {
-        return _mutator.isMutating()
+        return state.isLoading
     }
 
     override suspend fun <T> load(
@@ -54,6 +79,7 @@ private class LoaderImpl : FLoader {
     ): Result<T> {
         return _mutator.mutate {
             try {
+                _state.update { it.copy(isLoading = true) }
                 onLoad().let { data ->
                     currentCoroutineContext().ensureActive()
                     Result.success(data)
@@ -62,6 +88,7 @@ private class LoaderImpl : FLoader {
                 if (e is CancellationException) throw e
                 Result.failure(e)
             } finally {
+                _state.update { it.copy(isLoading = false) }
                 onFinish()
             }
         }
@@ -114,8 +141,6 @@ private class FMutator {
     }
 
     //-------------------- ext --------------------
-
-    fun isMutating(): Boolean = currentMutator.get() != null
 
     suspend fun cancelAndJoin() {
         while (true) {
