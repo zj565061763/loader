@@ -37,14 +37,15 @@ class SampleActivity : ComponentActivity() {
 
    private suspend fun load() {
       val uuid = UUID.randomUUID().toString()
-      _loader.load {
+      _loader.load(
+         onFinish = {
+            logMsg { "$uuid load onFinish" }
+         }
+      ) {
          logMsg { "$uuid load" }
          delay(3_000)
-      }.onSuccess {
-         logMsg { "$uuid load onSuccess" }
-      }.onFailure {
-         logMsg { "$uuid load onFailure $it" }
-      }
+         logMsg { "$uuid load success" }
+      }.getOrThrow()
    }
 }
 
