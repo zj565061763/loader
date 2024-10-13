@@ -30,6 +30,23 @@ class LoaderTest {
    }
 
    @Test
+   fun `test loading false`() = runTest {
+      val loader = FLoader()
+
+      launch {
+         loader.load(notifyLoading = false) {
+            delay(Long.MAX_VALUE)
+         }
+      }
+
+      runCurrent()
+      assertEquals(false, loader.isLoading())
+
+      loader.cancelLoad()
+      assertEquals(false, loader.isLoading())
+   }
+
+   @Test
    fun `test load success`() = runTest {
       val loader = FLoader()
       loader.load {
