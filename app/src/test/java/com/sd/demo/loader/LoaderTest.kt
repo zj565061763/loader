@@ -23,10 +23,10 @@ class LoaderTest {
       }
 
       runCurrent()
-      assertEquals(true, loader.isLoading())
+      assertEquals(true, loader.isLoading)
 
       loader.cancelLoad()
-      assertEquals(false, loader.isLoading())
+      assertEquals(false, loader.isLoading)
    }
 
    @Test
@@ -40,10 +40,10 @@ class LoaderTest {
       }
 
       runCurrent()
-      assertEquals(false, loader.isLoading())
+      assertEquals(false, loader.isLoading)
 
       loader.cancelLoad()
-      assertEquals(false, loader.isLoading())
+      assertEquals(false, loader.isLoading)
    }
 
    @Test

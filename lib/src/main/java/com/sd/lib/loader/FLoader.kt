@@ -5,9 +5,10 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -15,16 +16,17 @@ import java.util.concurrent.atomic.AtomicReference
 
 interface FLoader {
 
+   /** 状态流 */
+   val stateFlow: Flow<LoaderState>
+
+   /** 加载状态流 */
+   val loadingFlow: Flow<Boolean>
+
    /** 状态 */
    val state: LoaderState
 
-   /** 状态流 */
-   val stateFlow: StateFlow<LoaderState>
-
-   /**
-    * 是否正在加载中
-    */
-   fun isLoading(): Boolean
+   /** 是否正在加载中 */
+   val isLoading: Boolean
 
    /**
     * 开始加载，如果上一次加载还未完成，再次调用此方法，会取消上一次加载([CancellationException])，
@@ -61,19 +63,14 @@ data class LoaderState(
 //-------------------- impl --------------------
 
 private class LoaderImpl : FLoader {
-
    private val _mutator = FMutator()
    private val _state = MutableStateFlow(LoaderState())
 
-   override val state: LoaderState
-      get() = _state.value
+   override val stateFlow: Flow<LoaderState> = _state.asStateFlow()
+   override val loadingFlow: Flow<Boolean> = stateFlow.map { it.isLoading }
 
-   override val stateFlow: StateFlow<LoaderState>
-      get() = _state.asStateFlow()
-
-   override fun isLoading(): Boolean {
-      return state.isLoading
-   }
+   override val state: LoaderState get() = _state.value
+   override val isLoading: Boolean get() = state.isLoading
 
    override suspend fun <T> load(
       notifyLoading: Boolean,
