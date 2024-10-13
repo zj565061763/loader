@@ -4,7 +4,6 @@ import com.sd.lib.loader.FLoader
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
@@ -31,7 +30,7 @@ class LoaderTest {
    }
 
    @Test
-   fun `test load success`(): Unit = runBlocking {
+   fun `test load success`() = runTest {
       val loader = FLoader()
       loader.load {
          1
@@ -41,17 +40,18 @@ class LoaderTest {
    }
 
    @Test
-   fun `test load failure`(): Unit = runBlocking {
+   fun `test load failure`() = runTest {
       val loader = FLoader()
-
-      // onLoad
       loader.load {
          error("failure")
       }.let { result ->
          assertEquals("failure", result.exceptionOrNull()!!.message)
       }
+   }
 
-      // onFinish
+   @Test
+   fun `test onFinish error`() = runTest {
+      val loader = FLoader()
       runCatching {
          loader.load(
             onFinish = { error("failure onFinish") },
@@ -64,39 +64,35 @@ class LoaderTest {
    }
 
    @Test
-   fun `test load cancel`(): Unit = runBlocking {
+   fun `test load cancel`() = runTest {
       val loader = FLoader()
 
-      val loading = TestContinuation()
       val job = launch {
          loader.load {
-            loading.resume()
             delay(Long.MAX_VALUE)
             1
          }
       }
 
-      loading.await()
-
+      runCurrent()
       loader.cancelLoad()
+
       assertEquals(true, job.isCancelled)
       assertEquals(true, job.isCompleted)
    }
 
    @Test
-   fun `test load when loading`(): Unit = runBlocking {
+   fun `test load when loading`() = runTest {
       val loader = FLoader()
 
-      val loading = TestContinuation()
       val job = launch {
          loader.load {
-            loading.resume()
             delay(Long.MAX_VALUE)
             1
          }
       }
 
-      loading.await()
+      runCurrent()
 
       loader.load { 2 }.let { result ->
          assertEquals(2, result.getOrThrow())
@@ -106,7 +102,7 @@ class LoaderTest {
    }
 
    @Test
-   fun `test callback load success`(): Unit = runBlocking {
+   fun `test callback load success`() = runTest {
       val loader = FLoader()
       mutableListOf<String>().let { list ->
          loader.load(
@@ -119,7 +115,7 @@ class LoaderTest {
    }
 
    @Test
-   fun `test callback load failure`(): Unit = runBlocking {
+   fun `test callback load failure`() = runTest {
       val loader = FLoader()
 
       // onLoad
@@ -153,50 +149,44 @@ class LoaderTest {
    }
 
    @Test
-   fun `test callback load cancel`(): Unit = runBlocking {
+   fun `test callback load cancel`() = runTest {
       val loader = FLoader()
-
       val listCallback = mutableListOf<String>()
-      val loading = TestContinuation()
 
       launch {
          loader.load(
             onFinish = { listCallback.add("onFinish") },
             onLoad = {
                listCallback.add("onLoad")
-               loading.resume()
                delay(Long.MAX_VALUE)
                1
             },
          )
       }
 
-      loading.await()
-
+      runCurrent()
       loader.cancelLoad()
+
       assertEquals("onLoad|onFinish", listCallback.joinToString("|"))
    }
 
    @Test
-   fun `test callback load when loading`(): Unit = runBlocking {
+   fun `test callback load when loading`() = runTest {
       val loader = FLoader()
-
       val listCallback = mutableListOf<String>()
-      val loading = TestContinuation()
 
       launch {
          loader.load(
             onFinish = { listCallback.add("onFinish") },
             onLoad = {
                listCallback.add("onLoad")
-               loading.resume()
                delay(Long.MAX_VALUE)
                1
             },
          )
       }
 
-      loading.await()
+      runCurrent()
 
       mutableListOf<String>().let { list ->
          loader.load(
