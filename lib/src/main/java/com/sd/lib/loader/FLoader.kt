@@ -8,6 +8,7 @@ import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.sync.Mutex
@@ -67,7 +68,7 @@ private class LoaderImpl : FLoader {
    private val _state = MutableStateFlow(LoaderState())
 
    override val stateFlow: Flow<LoaderState> = _state.asStateFlow()
-   override val loadingFlow: Flow<Boolean> = stateFlow.map { it.isLoading }
+   override val loadingFlow: Flow<Boolean> = stateFlow.map { it.isLoading }.distinctUntilChanged()
 
    override val state: LoaderState get() = _state.value
    override val isLoading: Boolean get() = state.isLoading
