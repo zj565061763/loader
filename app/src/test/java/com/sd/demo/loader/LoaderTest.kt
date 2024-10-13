@@ -43,9 +43,9 @@ class LoaderTest {
    fun `test load failure`() = runTest {
       val loader = FLoader()
       loader.load {
-         error("failure")
+         error("load failure")
       }.let { result ->
-         assertEquals("failure", result.exceptionOrNull()!!.message)
+         assertEquals("load failure", result.exceptionOrNull()!!.message)
       }
    }
 
