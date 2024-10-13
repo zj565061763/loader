@@ -26,6 +26,7 @@ class MainActivity : ComponentActivity() {
          AppTheme {
             Content(
                listActivity = listOf(
+                  SampleActivity::class.java,
                ),
                onClickActivity = {
                   startActivity(Intent(this, it))
