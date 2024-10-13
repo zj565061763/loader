@@ -35,7 +35,7 @@ interface FLoader {
     * @param onLoad 加载回调
     */
    suspend fun <T> load(
-      notifyLoading: Boolean = false,
+      notifyLoading: Boolean = true,
       onFinish: () -> Unit = {},
       onLoad: suspend () -> T,
    ): Result<T>
