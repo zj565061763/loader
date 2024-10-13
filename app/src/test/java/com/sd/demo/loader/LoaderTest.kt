@@ -117,8 +117,6 @@ class LoaderTest {
    @Test
    fun `test callback load failure`() = runTest {
       val loader = FLoader()
-
-      // onLoad
       mutableListOf<String>().let { list ->
          loader.load(
             onFinish = { list.add("onFinish") },
@@ -130,8 +128,11 @@ class LoaderTest {
             assertEquals("onLoad|onFinish", list.joinToString("|"))
          }
       }
+   }
 
-      // onFinish
+   @Test
+   fun `test callback onFinish error`() = runTest {
+      val loader = FLoader()
       mutableListOf<String>().let { list ->
          runCatching {
             loader.load(
