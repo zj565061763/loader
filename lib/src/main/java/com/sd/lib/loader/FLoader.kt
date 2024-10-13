@@ -15,33 +15,35 @@ import java.util.concurrent.atomic.AtomicReference
 
 interface FLoader {
 
-    /** 状态 */
-    val state: LoaderState
+   /** 状态 */
+   val state: LoaderState
 
-    /** 状态流 */
-    val stateFlow: StateFlow<LoaderState>
+   /** 状态流 */
+   val stateFlow: StateFlow<LoaderState>
 
-    /**
-     * 是否正在加载中
-     */
-    fun isLoading(): Boolean
+   /**
+    * 是否正在加载中
+    */
+   fun isLoading(): Boolean
 
-    /**
-     * 开始加载，如果上一次加载还未完成，再次调用此方法，会取消上一次加载([CancellationException])，
-     * 如果[onLoad]触发了，则[onFinish]一定会触发，[onLoad]的异常会被捕获，除了[CancellationException]
-     *
-     * @param onFinish 结束回调
-     * @param onLoad 加载回调
-     */
-    suspend fun <T> load(
-        onFinish: () -> Unit = {},
-        onLoad: suspend () -> T,
-    ): Result<T>
+   /**
+    * 开始加载，如果上一次加载还未完成，再次调用此方法，会取消上一次加载([CancellationException])，
+    * 如果[onLoad]触发了，则[onFinish]一定会触发，[onLoad]的异常会被捕获，除了[CancellationException]
+    *
+    * @param notifyLoading 是否通知加载状态
+    * @param onFinish 结束回调
+    * @param onLoad 加载回调
+    */
+   suspend fun <T> load(
+      notifyLoading: Boolean = false,
+      onFinish: () -> Unit = {},
+      onLoad: suspend () -> T,
+   ): Result<T>
 
-    /**
-     * 取消加载
-     */
-    suspend fun cancelLoad()
+   /**
+    * 取消加载
+    */
+   suspend fun cancelLoad()
 }
 
 /**
@@ -52,113 +54,118 @@ fun FLoader(): FLoader = LoaderImpl()
 //-------------------- state --------------------
 
 data class LoaderState(
-    /** 是否正在加载中 */
-    val isLoading: Boolean = false,
+   /** 是否正在加载中 */
+   val isLoading: Boolean = false,
 )
 
 //-------------------- impl --------------------
 
 private class LoaderImpl : FLoader {
 
-    private val _mutator = FMutator()
-    private val _state = MutableStateFlow(LoaderState())
+   private val _mutator = FMutator()
+   private val _state = MutableStateFlow(LoaderState())
 
-    override val state: LoaderState
-        get() = _state.value
+   override val state: LoaderState
+      get() = _state.value
 
-    override val stateFlow: StateFlow<LoaderState>
-        get() = _state.asStateFlow()
+   override val stateFlow: StateFlow<LoaderState>
+      get() = _state.asStateFlow()
 
-    override fun isLoading(): Boolean {
-        return state.isLoading
-    }
+   override fun isLoading(): Boolean {
+      return state.isLoading
+   }
 
-    override suspend fun <T> load(
-        onFinish: () -> Unit,
-        onLoad: suspend () -> T,
-    ): Result<T> {
-        return _mutator.mutate {
-            try {
-                _state.update { it.copy(isLoading = true) }
-                onLoad().let { data ->
-                    currentCoroutineContext().ensureActive()
-                    Result.success(data)
-                }
-            } catch (e: Throwable) {
-                if (e is CancellationException) throw e
-                Result.failure(e)
-            } finally {
-                _state.update { it.copy(isLoading = false) }
-                onFinish()
+   override suspend fun <T> load(
+      notifyLoading: Boolean,
+      onFinish: () -> Unit,
+      onLoad: suspend () -> T,
+   ): Result<T> {
+      return _mutator.mutate {
+         try {
+            if (notifyLoading) {
+               _state.update { it.copy(isLoading = true) }
             }
-        }
-    }
+            onLoad().let { data ->
+               currentCoroutineContext().ensureActive()
+               Result.success(data)
+            }
+         } catch (e: Throwable) {
+            if (e is CancellationException) throw e
+            Result.failure(e)
+         } finally {
+            if (notifyLoading) {
+               _state.update { it.copy(isLoading = false) }
+            }
+            onFinish()
+         }
+      }
+   }
 
-    override suspend fun cancelLoad() {
-        _mutator.cancelAndJoin()
-    }
+   override suspend fun cancelLoad() {
+      _mutator.cancelAndJoin()
+   }
 }
 
 //-------------------- utils --------------------
 
 private class FMutator {
-    private class Mutator(val priority: Int, val job: Job) {
-        fun canInterrupt(other: Mutator) = priority >= other.priority
+   private class Mutator(val priority: Int, val job: Job) {
+      fun canInterrupt(other: Mutator) = priority >= other.priority
 
-        fun cancel() = job.cancel(MutationInterruptedException())
-    }
+      fun cancel() = job.cancel(MutationInterruptedException())
+   }
 
-    private val currentMutator = AtomicReference<Mutator?>(null)
-    private val mutex = Mutex()
+   private val currentMutator = AtomicReference<Mutator?>(null)
+   private val mutex = Mutex()
 
-    private fun tryMutateOrCancel(mutator: Mutator) {
-        while (true) {
-            val oldMutator = currentMutator.get()
-            if (oldMutator == null || mutator.canInterrupt(oldMutator)) {
-                if (currentMutator.compareAndSet(oldMutator, mutator)) {
-                    oldMutator?.cancel()
-                    break
-                }
-            } else throw CancellationException("Current mutation had a higher priority")
-        }
-    }
-
-    suspend fun <R> mutate(
-        priority: Int = 0,
-        block: suspend () -> R,
-    ) = coroutineScope {
-        val mutator = Mutator(priority, coroutineContext[Job]!!)
-
-        tryMutateOrCancel(mutator)
-
-        mutex.withLock {
-            try {
-                block()
-            } finally {
-                currentMutator.compareAndSet(mutator, null)
+   private fun tryMutateOrCancel(mutator: Mutator) {
+      while (true) {
+         val oldMutator = currentMutator.get()
+         if (oldMutator == null || mutator.canInterrupt(oldMutator)) {
+            if (currentMutator.compareAndSet(oldMutator, mutator)) {
+               oldMutator?.cancel()
+               break
             }
-        }
-    }
+         } else throw CancellationException("Current mutation had a higher priority")
+      }
+   }
 
-    //-------------------- ext --------------------
+   suspend fun <R> mutate(
+      priority: Int = 0,
+      block: suspend () -> R,
+   ) = coroutineScope {
+      val mutator = Mutator(priority, coroutineContext[Job]!!)
 
-    suspend fun cancelAndJoin() {
-        while (true) {
-            val mutator = currentMutator.get() ?: return
-            mutator.cancel()
-            try {
-                mutator.job.join()
-            } finally {
-                currentMutator.compareAndSet(mutator, null)
-            }
-        }
-    }
+      tryMutateOrCancel(mutator)
+
+      mutex.withLock {
+         try {
+            block()
+         } finally {
+            currentMutator.compareAndSet(mutator, null)
+         }
+      }
+   }
+
+   //-------------------- ext --------------------
+
+   suspend fun cancelAndJoin() {
+      while (true) {
+         val mutator = currentMutator.get() ?: return
+         mutator.cancel()
+         try {
+            mutator.job.join()
+         } finally {
+            currentMutator.compareAndSet(mutator, null)
+         }
+      }
+   }
 }
 
 private class MutationInterruptedException : CancellationException("Mutation interrupted") {
-    override fun fillInStackTrace(): Throwable {
-        // Avoid null.clone() on Android <= 6.0 when accessing stackTrace
-        stackTrace = emptyArray()
-        return this
-    }
+   override fun fillInStackTrace(): Throwable {
+      // Avoid null.clone() on Android <= 6.0 when accessing stackTrace
+      stackTrace = emptyArray()
+      return this
+   }
 }
