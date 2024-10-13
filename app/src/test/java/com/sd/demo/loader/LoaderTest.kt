@@ -1,28 +1,29 @@
 package com.sd.demo.loader
 
 import com.sd.lib.loader.FLoader
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.test.runCurrent
+import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
+@OptIn(ExperimentalCoroutinesApi::class)
 class LoaderTest {
 
    @Test
-   fun `test loading`(): Unit = runBlocking {
+   fun `test loading`() = runTest {
       val loader = FLoader()
-
-      val testContinuation = TestContinuation()
 
       launch {
          loader.load {
-            testContinuation.resume()
             delay(Long.MAX_VALUE)
          }
       }
 
-      testContinuation.await()
+      runCurrent()
       assertEquals(true, loader.isLoading())
 
       loader.cancelLoad()
