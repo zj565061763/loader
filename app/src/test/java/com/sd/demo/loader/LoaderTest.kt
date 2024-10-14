@@ -4,6 +4,7 @@ import com.sd.lib.loader.FLoader
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
@@ -13,43 +14,8 @@ import org.junit.Test
 class LoaderTest {
 
    @Test
-   fun `test loading`() = runTest {
-      val loader = FLoader()
-
-      launch {
-         loader.load {
-            delay(Long.MAX_VALUE)
-         }
-      }
-
-      runCurrent()
-      assertEquals(true, loader.isLoading)
-
-      loader.cancelLoad()
-      assertEquals(false, loader.isLoading)
-   }
-
-   @Test
-   fun `test loading false`() = runTest {
-      val loader = FLoader()
-
-      launch {
-         loader.load(notifyLoading = false) {
-            delay(Long.MAX_VALUE)
-         }
-      }
-
-      runCurrent()
-      assertEquals(false, loader.isLoading)
-
-      loader.cancelLoad()
-      assertEquals(false, loader.isLoading)
-   }
-
-   @Test
    fun `test load success`() = runTest {
-      val loader = FLoader()
-      loader.load {
+      FLoader().load {
          1
       }.let { result ->
          assertEquals(1, result.getOrThrow())
@@ -58,12 +24,45 @@ class LoaderTest {
 
    @Test
    fun `test load failure`() = runTest {
-      val loader = FLoader()
-      loader.load {
-         error("load failure")
+      FLoader().load {
+         error("load error")
       }.let { result ->
-         assertEquals("load failure", result.exceptionOrNull()!!.message)
+         assertEquals("load error", result.exceptionOrNull()!!.message)
       }
+   }
+
+   @Test
+   fun `test loading params true`() = runTest {
+      val loader = FLoader()
+
+      launch {
+         loader.load(notifyLoading = true) {
+            delay(1_000)
+         }
+      }
+
+      runCurrent()
+      assertEquals(true, loader.isLoading)
+
+      advanceUntilIdle()
+      assertEquals(false, loader.isLoading)
+   }
+
+   @Test
+   fun `test loading params false`() = runTest {
+      val loader = FLoader()
+
+      launch {
+         loader.load(notifyLoading = false) {
+            delay(1_000)
+         }
+      }
+
+      runCurrent()
+      assertEquals(false, loader.isLoading)
+
+      advanceUntilIdle()
+      assertEquals(false, loader.isLoading)
    }
 
    @Test
