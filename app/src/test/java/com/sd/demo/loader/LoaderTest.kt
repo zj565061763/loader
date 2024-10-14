@@ -83,12 +83,12 @@ class LoaderTest {
       val loader = FLoader()
       runCatching {
          loader.load(
-            onFinish = { error("failure onFinish") },
+            onFinish = { error("onFinish error") },
          ) {
             1
          }
       }.let { result ->
-         assertEquals("failure onFinish", result.exceptionOrNull()!!.message)
+         assertEquals("onFinish error", result.exceptionOrNull()!!.message)
       }
    }
 
