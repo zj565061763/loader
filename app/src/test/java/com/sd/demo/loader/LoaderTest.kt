@@ -33,15 +33,49 @@ class LoaderTest {
    }
 
    @Test
+   fun `test loading callback true`() = runTest {
+      val loader = FLoader(notifyLoading = { true })
+
+      launch {
+         loader.load {
+            delay(1_000)
+         }
+      }
+
+      runCurrent()
+      assertEquals(true, loader.isLoading)
+
+      advanceUntilIdle()
+      assertEquals(false, loader.isLoading)
+   }
+
+   @Test
+   fun `test loading callback false`() = runTest {
+      val loader = FLoader(notifyLoading = { false })
+
+      launch {
+         loader.load {
+            delay(1_000)
+         }
+      }
+
+      runCurrent()
+      assertEquals(false, loader.isLoading)
+
+      advanceUntilIdle()
+      assertEquals(false, loader.isLoading)
+   }
+
+   @Test
    fun `test loading params true`() = runTest {
-      assertLoadingParamsTrue(FLoader(notifyLoading = { true }))
-      assertLoadingParamsTrue(FLoader(notifyLoading = { false }))
+      testLoadingParamsTrue(FLoader(notifyLoading = { true }))
+      testLoadingParamsTrue(FLoader(notifyLoading = { false }))
    }
 
    @Test
    fun `test loading params false`() = runTest {
-      assertLoadingParamsFalse(FLoader(notifyLoading = { true }))
-      assertLoadingParamsFalse(FLoader(notifyLoading = { false }))
+      testLoadingParamsFalse(FLoader(notifyLoading = { true }))
+      testLoadingParamsFalse(FLoader(notifyLoading = { false }))
    }
 
    @Test
@@ -198,7 +232,7 @@ class LoaderTest {
 }
 
 @OptIn(ExperimentalCoroutinesApi::class)
-private fun TestScope.assertLoadingParamsTrue(loader: FLoader) {
+private fun TestScope.testLoadingParamsTrue(loader: FLoader) {
    launch {
       loader.load(notifyLoading = true) {
          delay(1_000)
@@ -214,7 +248,7 @@ private fun TestScope.assertLoadingParamsTrue(loader: FLoader) {
 
 
 @OptIn(ExperimentalCoroutinesApi::class)
-private fun TestScope.assertLoadingParamsFalse(loader: FLoader) {
+private fun TestScope.testLoadingParamsFalse(loader: FLoader) {
    launch {
       loader.load(notifyLoading = false) {
          delay(1_000)
