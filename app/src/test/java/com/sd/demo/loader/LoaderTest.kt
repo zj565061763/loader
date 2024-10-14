@@ -4,6 +4,7 @@ import com.sd.lib.loader.FLoader
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
@@ -33,36 +34,14 @@ class LoaderTest {
 
    @Test
    fun `test loading params true`() = runTest {
-      val loader = FLoader()
-
-      launch {
-         loader.load(notifyLoading = true) {
-            delay(1_000)
-         }
-      }
-
-      runCurrent()
-      assertEquals(true, loader.isLoading)
-
-      advanceUntilIdle()
-      assertEquals(false, loader.isLoading)
+      assertLoadingParamsTrue(FLoader(notifyLoading = { true }))
+      assertLoadingParamsTrue(FLoader(notifyLoading = { false }))
    }
 
    @Test
    fun `test loading params false`() = runTest {
-      val loader = FLoader()
-
-      launch {
-         loader.load(notifyLoading = false) {
-            delay(1_000)
-         }
-      }
-
-      runCurrent()
-      assertEquals(false, loader.isLoading)
-
-      advanceUntilIdle()
-      assertEquals(false, loader.isLoading)
+      assertLoadingParamsFalse(FLoader(notifyLoading = { true }))
+      assertLoadingParamsFalse(FLoader(notifyLoading = { false }))
    }
 
    @Test
@@ -216,4 +195,35 @@ class LoaderTest {
 
       assertEquals("onLoad|onFinish", listCallback.joinToString("|"))
    }
+}
+
+@OptIn(ExperimentalCoroutinesApi::class)
+private fun TestScope.assertLoadingParamsTrue(loader: FLoader) {
+   launch {
+      loader.load(notifyLoading = true) {
+         delay(1_000)
+      }
+   }
+
+   runCurrent()
+   assertEquals(true, loader.isLoading)
+
+   advanceUntilIdle()
+   assertEquals(false, loader.isLoading)
+}
+
+
+@OptIn(ExperimentalCoroutinesApi::class)
+private fun TestScope.assertLoadingParamsFalse(loader: FLoader) {
+   launch {
+      loader.load(notifyLoading = false) {
+         delay(1_000)
+      }
+   }
+
+   runCurrent()
+   assertEquals(false, loader.isLoading)
+
+   advanceUntilIdle()
+   assertEquals(false, loader.isLoading)
 }
