@@ -38,7 +38,7 @@ interface FLoader {
     * @param onLoad 加载回调
     */
    suspend fun <T> load(
-      notifyLoading: Boolean = true,
+      notifyLoading: Boolean? = null,
       onFinish: () -> Unit = {},
       onLoad: suspend () -> T,
    ): Result<T>
@@ -52,7 +52,9 @@ interface FLoader {
 /**
  * 创建[FLoader]
  */
-fun FLoader(): FLoader = LoaderImpl()
+fun FLoader(
+   notifyLoading: () -> Boolean = { true },
+): FLoader = LoaderImpl(notifyLoading = notifyLoading)
 
 //-------------------- state --------------------
 
@@ -63,7 +65,9 @@ data class LoaderState(
 
 //-------------------- impl --------------------
 
-private class LoaderImpl : FLoader {
+private class LoaderImpl(
+   private val notifyLoading: () -> Boolean,
+) : FLoader {
    private val _mutator = FMutator()
    private val _state = MutableStateFlow(LoaderState())
 
@@ -74,13 +78,14 @@ private class LoaderImpl : FLoader {
    override val isLoading: Boolean get() = state.isLoading
 
    override suspend fun <T> load(
-      notifyLoading: Boolean,
+      notifyLoading: Boolean?,
       onFinish: () -> Unit,
       onLoad: suspend () -> T,
    ): Result<T> {
       return _mutator.mutate {
+         val loading = notifyLoading ?: this.notifyLoading()
          try {
-            if (notifyLoading) {
+            if (loading) {
                _state.update { it.copy(isLoading = true) }
             }
             onLoad().let { data ->
@@ -91,7 +96,7 @@ private class LoaderImpl : FLoader {
             if (e is CancellationException) throw e
             Result.failure(e)
          } finally {
-            if (notifyLoading) {
+            if (loading) {
                _state.update { it.copy(isLoading = false) }
             }
             onFinish()
