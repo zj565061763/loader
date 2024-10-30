@@ -61,6 +61,9 @@ fun FLoader(
 data class LoaderState(
    /** 是否正在加载中 */
    val isLoading: Boolean = false,
+
+   /** 最后一次的加载结果 */
+   val result: Result<Unit>? = null,
 )
 
 //-------------------- impl --------------------
@@ -90,11 +93,15 @@ private class LoaderImpl(
             }
             onLoad().let { data ->
                currentCoroutineContext().ensureActive()
-               Result.success(data)
+               Result.success(data).also {
+                  _state.update { it.copy(result = Result.success(Unit)) }
+               }
             }
          } catch (e: Throwable) {
             if (e is CancellationException) throw e
-            Result.failure(e)
+            Result.failure<T>(e).also {
+               _state.update { it.copy(result = Result.failure(e)) }
+            }
          } finally {
             if (loading) {
                _state.update { it.copy(isLoading = false) }
