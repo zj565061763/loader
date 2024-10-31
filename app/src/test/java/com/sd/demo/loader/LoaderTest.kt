@@ -16,19 +16,23 @@ class LoaderTest {
 
    @Test
    fun `test load success`() = runTest {
-      FLoader().load {
+      val loader = FLoader()
+      loader.load {
          1
       }.let { result ->
          assertEquals(1, result.getOrThrow())
+         assertEquals(true, loader.state.result?.isSuccess)
       }
    }
 
    @Test
    fun `test load failure`() = runTest {
-      FLoader().load {
+      val loader = FLoader()
+      loader.load {
          error("load error")
       }.let { result ->
          assertEquals("load error", result.exceptionOrNull()!!.message)
+         assertEquals("load error", loader.state.result!!.exceptionOrNull()!!.message)
       }
    }
 
