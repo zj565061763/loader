@@ -3,7 +3,6 @@ package com.sd.demo.loader
 import app.cash.turbine.test
 import com.sd.lib.loader.FLoader
 import com.sd.lib.loader.loadingFlow
-import com.sd.lib.loader.resultFlow
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.cancelAndJoin
@@ -22,8 +21,6 @@ class LoaderTest {
   @Test
   fun `test load when success`() = runTest {
     val loader = FLoader()
-    assertEquals(null, loader.stateFlow.value.result)
-
     var container = ""
     loader.load {
       assertEquals(true, loader.isLoading())
@@ -33,7 +30,6 @@ class LoaderTest {
       }
       1
     }.also { result ->
-      assertEquals(true, loader.stateFlow.value.result!!.isSuccess)
       assertEquals(1, result.getOrThrow())
       assertEquals("onLoadFinish", container)
     }
@@ -42,7 +38,6 @@ class LoaderTest {
   @Test
   fun `test load when error in block`() = runTest {
     val loader = FLoader()
-
     var container = ""
     loader.load {
       assertEquals(true, loader.isLoading())
@@ -53,7 +48,6 @@ class LoaderTest {
       error("error in block")
     }.also { result ->
       assertEquals("error in block", result.exceptionOrNull()!!.message)
-      assertEquals("error in block", loader.stateFlow.value.result!!.exceptionOrNull()!!.message)
       assertEquals("onLoadFinish", container)
     }
   }
@@ -219,43 +213,6 @@ class LoaderTest {
       assertEquals(false, awaitItem())
       assertEquals(true, awaitItem())
       assertEquals(false, awaitItem())
-    }
-  }
-
-  @Test
-  fun `test resultFlow when load success`() = runTest {
-    val loader = FLoader()
-    loader.resultFlow.test {
-      loader.load { 1 }
-      assertEquals(null, awaitItem())
-      assertEquals(true, awaitItem()!!.isSuccess)
-    }
-  }
-
-  @Test
-  fun `test resultFlow when load error in block`() = runTest {
-    val loader = FLoader()
-    loader.resultFlow.test {
-      loader.load { error("error in block") }
-      assertEquals(null, awaitItem())
-      assertEquals("error in block", awaitItem()!!.exceptionOrNull()!!.message)
-    }
-  }
-
-  @Test
-  fun `test resultFlow when load cancel`() = runTest {
-    val loader = FLoader()
-    loader.resultFlow.test {
-      launch {
-        loader.load {
-          delay(5_000)
-          1
-        }
-      }.also {
-        runCurrent()
-        loader.cancel()
-      }
-      assertEquals(null, awaitItem())
     }
   }
 

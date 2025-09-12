@@ -36,9 +36,7 @@ interface FLoader {
    */
   suspend fun <T> load(onLoad: suspend LoadScope.() -> T): Result<T>
 
-  /**
-   * 如果正在加载中，会抛出[CancellationException]
-   */
+  /** 如果正在加载中，会抛出[CancellationException] */
   suspend fun <T> tryLoad(onLoad: suspend LoadScope.() -> T): Result<T>
 
   /** 取消加载，并等待取消完成 */
@@ -47,15 +45,10 @@ interface FLoader {
   data class State(
     /** 是否正在加载中 */
     val isLoading: Boolean = false,
-
-    /** 最后一次的加载结果 */
-    val result: Result<Unit>? = null,
   )
 
   interface LoadScope {
-    /**
-     * 加载成功，加载失败，或者加载被取消，都会在最后触发[block]
-     */
+    /** 加载成功，加载失败，或者加载被取消，都会在最后触发[block] */
     fun onLoadFinish(block: () -> Unit)
   }
 }
@@ -65,10 +58,6 @@ fun FLoader(): FLoader = LoaderImpl()
 /** 加载状态流 */
 val FLoader.loadingFlow: Flow<Boolean>
   get() = stateFlow.map { it.isLoading }.distinctUntilChanged()
-
-/** 加载状态流 */
-val FLoader.resultFlow: Flow<Result<Unit>?>
-  get() = stateFlow.map { it.result }.distinctUntilChanged()
 
 //-------------------- impl --------------------
 
@@ -102,17 +91,12 @@ private class LoaderImpl : FLoader {
     return try {
       _stateFlow.update { it.copy(isLoading = true) }
       with(loadScope) { onLoad() }.let { data ->
-        Result.success(data).also {
-          currentCoroutineContext().ensureActive()
-          _stateFlow.update { it.copy(result = Result.success(Unit)) }
-        }
+        currentCoroutineContext().ensureActive()
+        Result.success(data)
       }
     } catch (e: Throwable) {
       if (e is CancellationException) throw e
-      Result.failure<T>(e).also {
-        currentCoroutineContext().ensureActive()
-        _stateFlow.update { it.copy(result = Result.failure(e)) }
-      }
+      Result.failure(e)
     } finally {
       _stateFlow.update { it.copy(isLoading = false) }
       loadScope.notifyLoadFinish()
