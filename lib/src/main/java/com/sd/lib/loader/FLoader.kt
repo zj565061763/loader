@@ -1,181 +1,223 @@
 package com.sd.lib.loader
 
-import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
-import java.util.concurrent.atomic.AtomicReference
+import kotlinx.coroutines.withContext
+import kotlin.coroutines.AbstractCoroutineContextElement
+import kotlin.coroutines.CoroutineContext
+import kotlin.coroutines.cancellation.CancellationException
 
 interface FLoader {
+  /** 状态流 */
+  val stateFlow: StateFlow<State>
 
-   /** 状态流 */
-   val stateFlow: Flow<LoaderState>
+  /** 是否正在加载中 */
+  fun isLoading(): Boolean
 
-   /** 加载状态流 */
-   val loadingFlow: Flow<Boolean>
+  /**
+   * 开始加载，如果上一次加载还未完成，再次调用此方法，会取消上一次加载，
+   * [onLoad]的异常会被捕获，除了[CancellationException]
+   *
+   * 注意：[onLoad]中不允许嵌套调用[load]，否则会抛异常
+   *
+   * @param onLoad 加载回调
+   */
+  suspend fun <T> load(onLoad: suspend LoadScope.() -> T): Result<T>
 
-   /** 状态 */
-   val state: LoaderState
+  /**
+   * 如果正在加载中，会抛出[CancellationException]
+   */
+  suspend fun <T> tryLoad(onLoad: suspend LoadScope.() -> T): Result<T>
 
-   /** 是否正在加载中 */
-   val isLoading: Boolean
+  /** 取消加载，并等待取消完成 */
+  suspend fun cancel()
 
-   /**
-    * 开始加载，如果上一次加载还未完成，再次调用此方法，会取消上一次加载([CancellationException])，
-    * 如果[onLoad]触发了，则[onFinish]一定会触发，[onLoad]的异常会被捕获，除了[CancellationException]
-    *
-    * @param notifyLoading 是否通知加载状态
-    * @param onFinish 结束回调
-    * @param onLoad 加载回调
-    */
-   suspend fun <T> load(
-      notifyLoading: Boolean? = null,
-      onFinish: () -> Unit = {},
-      onLoad: suspend () -> T,
-   ): Result<T>
+  data class State(
+    /** 是否正在加载中 */
+    val isLoading: Boolean = false,
 
-   /**
-    * 取消加载
-    */
-   suspend fun cancelLoad()
+    /** 最后一次的加载结果 */
+    val result: Result<Unit>? = null,
+  )
+
+  interface LoadScope {
+    /**
+     * 加载成功，加载失败，或者加载被取消，都会在最后触发[block]
+     */
+    fun onLoadFinish(block: () -> Unit)
+  }
 }
 
-/**
- * 创建[FLoader]
- */
-fun FLoader(
-   notifyLoading: () -> Boolean = { true },
-): FLoader = LoaderImpl(notifyLoading = notifyLoading)
+fun FLoader(): FLoader = LoaderImpl()
 
-//-------------------- state --------------------
+/** 加载状态流 */
+val FLoader.loadingFlow: Flow<Boolean>
+  get() = stateFlow.map { it.isLoading }.distinctUntilChanged()
 
-data class LoaderState(
-   /** 是否正在加载中 */
-   val isLoading: Boolean = false,
-
-   /** 最后一次的加载结果 */
-   val result: Result<Unit>? = null,
-)
+/** 加载状态流 */
+val FLoader.resultFlow: Flow<Result<Unit>?>
+  get() = stateFlow.map { it.result }.distinctUntilChanged()
 
 //-------------------- impl --------------------
 
-private class LoaderImpl(
-   private val notifyLoading: () -> Boolean,
-) : FLoader {
-   private val _mutator = FMutator()
-   private val _state = MutableStateFlow(LoaderState())
+private class LoaderImpl : FLoader {
+  private val _mutator = Mutator()
+  private val _stateFlow = MutableStateFlow(FLoader.State())
+  override val stateFlow: StateFlow<FLoader.State> = _stateFlow.asStateFlow()
 
-   override val stateFlow: Flow<LoaderState> = _state.asStateFlow()
-   override val loadingFlow: Flow<Boolean> = stateFlow.map { it.isLoading }.distinctUntilChanged()
+  override fun isLoading(): Boolean {
+    return _stateFlow.value.isLoading
+  }
 
-   override val state: LoaderState get() = _state.value
-   override val isLoading: Boolean get() = state.isLoading
+  override suspend fun <T> load(onLoad: suspend FLoader.LoadScope.() -> T): Result<T> {
+    return _mutator.mutate {
+      doLoad(onLoad)
+    }
+  }
 
-   override suspend fun <T> load(
-      notifyLoading: Boolean?,
-      onFinish: () -> Unit,
-      onLoad: suspend () -> T,
-   ): Result<T> {
-      return _mutator.mutate {
-         val loading = notifyLoading ?: this.notifyLoading()
-         try {
-            if (loading) {
-               _state.update { it.copy(isLoading = true) }
-            }
-            onLoad().let { data ->
-               currentCoroutineContext().ensureActive()
-               Result.success(data).also {
-                  _state.update { it.copy(result = Result.success(Unit)) }
-               }
-            }
-         } catch (e: Throwable) {
-            if (e is CancellationException) throw e
-            Result.failure<T>(e).also {
-               _state.update { it.copy(result = Result.failure(e)) }
-            }
-         } finally {
-            if (loading) {
-               _state.update { it.copy(isLoading = false) }
-            }
-            onFinish()
-         }
+  override suspend fun <T> tryLoad(onLoad: suspend FLoader.LoadScope.() -> T): Result<T> {
+    return _mutator.mutateOrThrowCancellation {
+      doLoad(onLoad)
+    }
+  }
+
+  override suspend fun cancel() {
+    _mutator.cancelMutate()
+  }
+
+  private suspend fun <T> Mutator.MutateScope.doLoad(onLoad: suspend FLoader.LoadScope.() -> T): Result<T> {
+    val loadScope = LoadScopeImpl()
+    return try {
+      _stateFlow.update { it.copy(isLoading = true) }
+      with(loadScope) { onLoad() }.let { data ->
+        Result.success(data).also {
+          ensureMutateActive()
+          _stateFlow.update { it.copy(result = Result.success(Unit)) }
+        }
       }
-   }
+    } catch (e: Throwable) {
+      if (e is CancellationException) throw e
+      Result.failure<T>(e).also {
+        ensureMutateActive()
+        _stateFlow.update { it.copy(result = Result.failure(e)) }
+      }
+    } finally {
+      _stateFlow.update { it.copy(isLoading = false) }
+      loadScope.notifyLoadFinish()
+    }
+  }
 
-   override suspend fun cancelLoad() {
-      _mutator.cancelAndJoin()
-   }
+  private class LoadScopeImpl : FLoader.LoadScope {
+    private var _onLoadFinishBlock: (() -> Unit)? = null
+
+    override fun onLoadFinish(block: () -> Unit) {
+      _onLoadFinishBlock = block
+    }
+
+    fun notifyLoadFinish() {
+      _onLoadFinishBlock?.also { finishBlock ->
+        _onLoadFinishBlock = null
+        finishBlock()
+      }
+    }
+  }
 }
 
-//-------------------- utils --------------------
+private class Mutator {
+  private var _job: Job? = null
+  private val _jobMutex = Mutex()
+  private val _mutateMutex = Mutex()
 
-private class FMutator {
-   private class Mutator(val priority: Int, val job: Job) {
-      fun canInterrupt(other: Mutator) = priority >= other.priority
+  suspend fun <T> mutate(block: suspend MutateScope.() -> T): T {
+    checkNested()
+    return mutate(
+      onStart = {},
+      block = block,
+    )
+  }
 
-      fun cancel() = job.cancel(MutationInterruptedException())
-   }
+  suspend fun <T> mutateOrThrowCancellation(block: suspend MutateScope.() -> T): T {
+    checkNested()
+    return mutate(
+      onStart = { if (_job?.isActive == true) throw CancellationException() },
+      block = block,
+    )
+  }
 
-   private val currentMutator = AtomicReference<Mutator?>(null)
-   private val mutex = Mutex()
+  suspend fun cancelMutate() {
+    _jobMutex.withLock {
+      _job?.cancelAndJoin()
+      _job = null
+    }
+  }
 
-   private fun tryMutateOrCancel(mutator: Mutator) {
-      while (true) {
-         val oldMutator = currentMutator.get()
-         if (oldMutator == null || mutator.canInterrupt(oldMutator)) {
-            if (currentMutator.compareAndSet(oldMutator, mutator)) {
-               oldMutator?.cancel()
-               break
-            }
-         } else throw CancellationException("Current mutation had a higher priority")
+  private suspend fun <R> mutate(
+    onStart: () -> Unit,
+    block: suspend MutateScope.() -> R,
+  ): R {
+    return coroutineScope {
+      val mutateContext = coroutineContext
+      val mutateJob = checkNotNull(mutateContext[Job])
+
+      _jobMutex.withLock {
+        onStart()
+        _job?.cancelAndJoin()
+        _job = mutateJob
+        mutateJob.invokeOnCompletion { releaseJob(mutateJob) }
       }
-   }
 
-   suspend fun <R> mutate(
-      priority: Int = 0,
-      block: suspend () -> R,
-   ) = coroutineScope {
-      val mutator = Mutator(priority, coroutineContext[Job]!!)
-
-      tryMutateOrCancel(mutator)
-
-      mutex.withLock {
-         try {
-            block()
-         } finally {
-            currentMutator.compareAndSet(mutator, null)
-         }
+      doMutate {
+        with(newMutateScope(mutateContext)) { block() }
       }
-   }
+    }
+  }
 
-   //-------------------- ext --------------------
-
-   suspend fun cancelAndJoin() {
-      while (true) {
-         val mutator = currentMutator.get() ?: return
-         mutator.cancel()
-         try {
-            mutator.job.join()
-         } finally {
-            currentMutator.compareAndSet(mutator, null)
-         }
+  private suspend fun <T> doMutate(block: suspend () -> T): T {
+    return _mutateMutex.withLock {
+      withContext(MutateElement(mutator = this@Mutator)) {
+        block()
       }
-   }
-}
+    }
+  }
 
-private class MutationInterruptedException : CancellationException("Mutation interrupted") {
-   override fun fillInStackTrace(): Throwable {
-      // Avoid null.clone() on Android <= 6.0 when accessing stackTrace
-      stackTrace = emptyArray()
-      return this
-   }
+  private fun releaseJob(job: Job) {
+    if (_jobMutex.tryLock()) {
+      if (_job === job) _job = null
+      _jobMutex.unlock()
+    }
+  }
+
+  private fun newMutateScope(mutateContext: CoroutineContext): MutateScope {
+    return object : MutateScope {
+      override suspend fun ensureMutateActive() {
+        currentCoroutineContext().ensureActive()
+        mutateContext.ensureActive()
+      }
+    }
+  }
+
+  private suspend fun checkNested() {
+    val element = currentCoroutineContext()[MutateElement]
+    if (element?.mutator === this@Mutator) error("Nested invoke")
+  }
+
+  private class MutateElement(val mutator: Mutator) : AbstractCoroutineContextElement(MutateElement) {
+    companion object Key : CoroutineContext.Key<MutateElement>
+  }
+
+  interface MutateScope {
+    suspend fun ensureMutateActive()
+  }
 }

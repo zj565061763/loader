@@ -18,48 +18,44 @@ import kotlinx.coroutines.launch
 import java.util.UUID
 
 class SampleActivity : ComponentActivity() {
-   private val _loader = FLoader()
+  private val _loader = FLoader()
 
-   override fun onCreate(savedInstanceState: Bundle?) {
-      super.onCreate(savedInstanceState)
-      setContent {
-         AppTheme {
-            Content(
-               onClick = {
-                  lifecycleScope.launch {
-                     load()
-                  }
-               }
-            )
-         }
+  override fun onCreate(savedInstanceState: Bundle?) {
+    super.onCreate(savedInstanceState)
+    setContent {
+      AppTheme {
+        Content(
+          onClick = {
+            lifecycleScope.launch {
+              load()
+            }
+          }
+        )
       }
-   }
+    }
+  }
 
-   private suspend fun load() {
-      val uuid = UUID.randomUUID().toString()
-      _loader.load(
-         onFinish = {
-            logMsg { "$uuid load onFinish" }
-         }
-      ) {
-         logMsg { "$uuid load" }
-         delay(3_000)
-         logMsg { "$uuid load success" }
-      }.getOrThrow()
-   }
+  private suspend fun load() {
+    val uuid = UUID.randomUUID().toString()
+    _loader.load {
+      logMsg { "$uuid load" }
+      delay(3_000)
+      logMsg { "$uuid load success" }
+    }.getOrThrow()
+  }
 }
 
 @Composable
 private fun Content(
-   modifier: Modifier = Modifier,
-   onClick: () -> Unit,
+  modifier: Modifier = Modifier,
+  onClick: () -> Unit,
 ) {
-   Column(
-      modifier = modifier.fillMaxSize(),
-      horizontalAlignment = Alignment.CenterHorizontally,
-   ) {
-      Button(onClick = onClick) {
-         Text("click")
-      }
-   }
+  Column(
+    modifier = modifier.fillMaxSize(),
+    horizontalAlignment = Alignment.CenterHorizontally,
+  ) {
+    Button(onClick = onClick) {
+      Text("click")
+    }
+  }
 }

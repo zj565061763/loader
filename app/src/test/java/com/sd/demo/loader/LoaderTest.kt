@@ -1,267 +1,277 @@
 package com.sd.demo.loader
 
+import app.cash.turbine.test
 import com.sd.lib.loader.FLoader
+import com.sd.lib.loader.loadingFlow
+import com.sd.lib.loader.resultFlow
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.test.TestScope
-import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Test
+import kotlin.coroutines.cancellation.CancellationException
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class LoaderTest {
 
-   @Test
-   fun `test load success`() = runTest {
-      val loader = FLoader()
+  @Test
+  fun `test load when success`() = runTest {
+    val loader = FLoader()
+    assertEquals(null, loader.stateFlow.value.result)
+
+    var container = ""
+    loader.load {
+      assertEquals(true, loader.isLoading())
+      onLoadFinish {
+        assertEquals(false, loader.isLoading())
+        container += "onLoadFinish"
+      }
+      1
+    }.also { result ->
+      assertEquals(true, loader.stateFlow.value.result!!.isSuccess)
+      assertEquals(1, result.getOrThrow())
+      assertEquals("onLoadFinish", container)
+    }
+  }
+
+  @Test
+  fun `test load when error in block`() = runTest {
+    val loader = FLoader()
+
+    var container = ""
+    loader.load {
+      assertEquals(true, loader.isLoading())
+      onLoadFinish {
+        assertEquals(false, loader.isLoading())
+        container += "onLoadFinish"
+      }
+      error("error in block")
+    }.also { result ->
+      assertEquals("error in block", result.exceptionOrNull()!!.message)
+      assertEquals("error in block", loader.stateFlow.value.result!!.exceptionOrNull()!!.message)
+      assertEquals("onLoadFinish", container)
+    }
+  }
+
+  @Test
+  fun `test load when loading`() = runTest {
+    val loader = FLoader()
+    var container = ""
+
+    val job = launch {
       loader.load {
-         1
-      }.let { result ->
-         assertEquals(1, result.getOrThrow())
-         assertEquals(true, loader.state.result?.isSuccess)
+        assertEquals(true, loader.isLoading())
+        onLoadFinish {
+          assertEquals(false, loader.isLoading())
+          container += "onLoadFinish1"
+        }
+        delay(Long.MAX_VALUE)
       }
-   }
-
-   @Test
-   fun `test load failure`() = runTest {
-      val loader = FLoader()
-      loader.load {
-         error("load error")
-      }.let { result ->
-         assertEquals("load error", result.exceptionOrNull()!!.message)
-         assertEquals("load error", loader.state.result!!.exceptionOrNull()!!.message)
-      }
-   }
-
-   @Test
-   fun `test loading callback true`() = runTest {
-      val loader = FLoader(notifyLoading = { true })
-
-      launch {
-         loader.load {
-            delay(1_000)
-         }
-      }
-
+    }.also {
       runCurrent()
-      assertEquals(true, loader.isLoading)
+    }
 
-      advanceUntilIdle()
-      assertEquals(false, loader.isLoading)
-   }
-
-   @Test
-   fun `test loading callback false`() = runTest {
-      val loader = FLoader(notifyLoading = { false })
-
-      launch {
-         loader.load {
-            delay(1_000)
-         }
+    loader.load {
+      assertEquals(true, loader.isLoading())
+      onLoadFinish {
+        assertEquals(false, loader.isLoading())
+        container += "onLoadFinish2"
       }
-
-      runCurrent()
-      assertEquals(false, loader.isLoading)
-
-      advanceUntilIdle()
-      assertEquals(false, loader.isLoading)
-   }
-
-   @Test
-   fun `test loading params true`() = runTest {
-      testLoadingParamsTrue(FLoader(notifyLoading = { true }))
-      testLoadingParamsTrue(FLoader(notifyLoading = { false }))
-   }
-
-   @Test
-   fun `test loading params false`() = runTest {
-      testLoadingParamsFalse(FLoader(notifyLoading = { true }))
-      testLoadingParamsFalse(FLoader(notifyLoading = { false }))
-   }
-
-   @Test
-   fun `test onFinish error`() = runTest {
-      val loader = FLoader()
-      runCatching {
-         loader.load(
-            onFinish = { error("onFinish error") },
-         ) {
-            1
-         }
-      }.let { result ->
-         assertEquals("onFinish error", result.exceptionOrNull()!!.message)
-      }
-   }
-
-   @Test
-   fun `test load cancel`() = runTest {
-      val loader = FLoader()
-
-      val job = launch {
-         loader.load {
-            delay(Long.MAX_VALUE)
-            1
-         }
-      }
-
-      runCurrent()
-      loader.cancelLoad()
-
+      assertEquals("onLoadFinish1", container)
       assertEquals(true, job.isCancelled)
       assertEquals(true, job.isCompleted)
-   }
+      2
+    }.also { result ->
+      assertEquals(2, result.getOrThrow())
+      assertEquals("onLoadFinish1onLoadFinish2", container)
+    }
+  }
 
-   @Test
-   fun `test load when loading`() = runTest {
-      val loader = FLoader()
-
-      val job = launch {
-         loader.load {
-            delay(Long.MAX_VALUE)
-            1
-         }
+  @Test
+  fun `test load when cancel`() = runTest {
+    val loader = FLoader()
+    var container = ""
+    launch {
+      loader.load {
+        assertEquals(true, loader.isLoading())
+        onLoadFinish {
+          assertEquals(false, loader.isLoading())
+          container += "onLoadFinish"
+        }
+        delay(Long.MAX_VALUE)
       }
-
+    }.also { job ->
       runCurrent()
+      loader.cancel()
+      assertEquals(true, job.isCancelled)
+      assertEquals(true, job.isCompleted)
+      assertEquals("onLoadFinish", container)
+    }
+  }
 
-      loader.load { 2 }.let { result ->
-         assertEquals(2, result.getOrThrow())
-         assertEquals(true, job.isCancelled)
-         assertEquals(true, job.isCompleted)
+  @Test
+  fun `test load when throw CancellationException in block`() = runTest {
+    val loader = FLoader()
+    var container = ""
+    launch {
+      loader.load {
+        assertEquals(true, loader.isLoading())
+        onLoadFinish {
+          assertEquals(false, loader.isLoading())
+          container += "onLoadFinish"
+        }
+        throw CancellationException()
       }
-   }
+    }.also { job ->
+      runCurrent()
+      assertEquals(true, job.isCancelled)
+      assertEquals(true, job.isCompleted)
+      assertEquals("onLoadFinish", container)
+    }
+  }
 
-   @Test
-   fun `test callback load success`() = runTest {
-      val loader = FLoader()
-      mutableListOf<String>().let { list ->
-         loader.load(
-            onFinish = { list.add("onFinish") },
-            onLoad = { list.add("onLoad") },
-         ).let {
-            assertEquals("onLoad|onFinish", list.joinToString("|"))
-         }
+  @Test
+  fun `test load when cancel in block`() = runTest {
+    val loader = FLoader()
+    var container = ""
+    launch {
+      loader.load {
+        assertEquals(true, loader.isLoading())
+        onLoadFinish {
+          assertEquals(false, loader.isLoading())
+          container += "onLoadFinish"
+        }
+        currentCoroutineContext().cancel()
       }
-   }
+    }.also { job ->
+      runCurrent()
+      assertEquals(true, job.isCancelled)
+      assertEquals(true, job.isCompleted)
+      assertEquals("onLoadFinish", container)
+    }
+  }
 
-   @Test
-   fun `test callback load failure`() = runTest {
-      val loader = FLoader()
-      mutableListOf<String>().let { list ->
-         loader.load(
-            onFinish = { list.add("onFinish") },
-            onLoad = {
-               list.add("onLoad")
-               error("failure")
-            },
-         ).let {
-            assertEquals("onLoad|onFinish", list.joinToString("|"))
-         }
-      }
-   }
+  @Test
+  fun `test loadingFlow`() = runTest {
+    val loader = FLoader()
+    loader.loadingFlow.test {
+      loader.load {}
+      assertEquals(false, awaitItem())
+      assertEquals(true, awaitItem())
+      assertEquals(false, awaitItem())
+    }
+  }
 
-   @Test
-   fun `test callback onFinish error`() = runTest {
-      val loader = FLoader()
-      mutableListOf<String>().let { list ->
-         runCatching {
-            loader.load(
-               onFinish = {
-                  list.add("onFinish")
-                  error("failure onFinish")
-               },
-               onLoad = { list.add("onLoad") },
-            )
-         }.let { result ->
-            assertEquals("failure onFinish", result.exceptionOrNull()!!.message)
-            assertEquals("onLoad|onFinish", list.joinToString("|"))
-         }
-      }
-   }
-
-   @Test
-   fun `test callback load cancel`() = runTest {
-      val loader = FLoader()
-      val listCallback = mutableListOf<String>()
-
+  @Test
+  fun `test loadingFlow when Reload`() = runTest {
+    val loader = FLoader()
+    loader.loadingFlow.test {
       launch {
-         loader.load(
-            onFinish = { listCallback.add("onFinish") },
-            onLoad = {
-               listCallback.add("onLoad")
-               delay(Long.MAX_VALUE)
-               1
-            },
-         )
+        loader.load { delay(Long.MAX_VALUE) }
+      }.also {
+        runCurrent()
+        loader.load { }
       }
+      assertEquals(false, awaitItem())
+      assertEquals(true, awaitItem())
+      assertEquals(false, awaitItem())
+      assertEquals(true, awaitItem())
+      assertEquals(false, awaitItem())
+    }
+  }
 
-      runCurrent()
-      loader.cancelLoad()
-
-      assertEquals("onLoad|onFinish", listCallback.joinToString("|"))
-   }
-
-   @Test
-   fun `test callback load when loading`() = runTest {
-      val loader = FLoader()
-      val listCallback = mutableListOf<String>()
-
+  @Test
+  fun `test loadingFlow when cancel`() = runTest {
+    val loader = FLoader()
+    loader.loadingFlow.test {
       launch {
-         loader.load(
-            onFinish = { listCallback.add("onFinish") },
-            onLoad = {
-               listCallback.add("onLoad")
-               delay(Long.MAX_VALUE)
-               1
-            },
-         )
+        loader.load { delay(Long.MAX_VALUE) }
+      }.also {
+        runCurrent()
+        loader.cancel()
       }
+      assertEquals(false, awaitItem())
+      assertEquals(true, awaitItem())
+      assertEquals(false, awaitItem())
+    }
+  }
 
+  @Test
+  fun `test resultFlow when load success`() = runTest {
+    val loader = FLoader()
+    loader.resultFlow.test {
+      loader.load { 1 }
+      assertEquals(null, awaitItem())
+      assertEquals(true, awaitItem()!!.isSuccess)
+    }
+  }
+
+  @Test
+  fun `test resultFlow when load error in block`() = runTest {
+    val loader = FLoader()
+    loader.resultFlow.test {
+      loader.load { error("error in block") }
+      assertEquals(null, awaitItem())
+      assertEquals("error in block", awaitItem()!!.exceptionOrNull()!!.message)
+    }
+  }
+
+  @Test
+  fun `test resultFlow when load cancel`() = runTest {
+    val loader = FLoader()
+    loader.resultFlow.test {
+      launch {
+        loader.load {
+          delay(5_000)
+          1
+        }
+      }.also {
+        runCurrent()
+        loader.cancel()
+      }
+      assertEquals(null, awaitItem())
+    }
+  }
+
+  @Test
+  fun `test tryLoad`() = runTest {
+    val loader = FLoader()
+
+    val job = launch {
+      loader.load { delay(Long.MAX_VALUE) }
+    }.also {
       runCurrent()
+    }
 
-      mutableListOf<String>().let { list ->
-         loader.load(
-            onFinish = { list.add("onFinish") },
-            onLoad = { list.add("onLoad") },
-         ).let {
-            assertEquals("onLoad|onFinish", list.joinToString("|"))
-         }
+    runCatching {
+      loader.tryLoad { 1 }
+    }.also { result ->
+      assertEquals(true, result.exceptionOrNull() is CancellationException)
+    }
+
+    job.cancelAndJoin()
+  }
+
+  @Test
+  fun `test nested load`() = runTest {
+    val loader = FLoader()
+    val list = mutableListOf<String>()
+
+    loader.load {
+      runCatching {
+        loader.load { }
+      }.also {
+        assertEquals("Nested invoke", it.exceptionOrNull()!!.message)
+        list.add("1")
       }
+      list.add("2")
+    }
 
-      assertEquals("onLoad|onFinish", listCallback.joinToString("|"))
-   }
-}
-
-@OptIn(ExperimentalCoroutinesApi::class)
-private fun TestScope.testLoadingParamsTrue(loader: FLoader) {
-   launch {
-      loader.load(notifyLoading = true) {
-         delay(1_000)
-      }
-   }
-
-   runCurrent()
-   assertEquals(true, loader.isLoading)
-
-   advanceUntilIdle()
-   assertEquals(false, loader.isLoading)
-}
-
-
-@OptIn(ExperimentalCoroutinesApi::class)
-private fun TestScope.testLoadingParamsFalse(loader: FLoader) {
-   launch {
-      loader.load(notifyLoading = false) {
-         delay(1_000)
-      }
-   }
-
-   runCurrent()
-   assertEquals(false, loader.isLoading)
-
-   advanceUntilIdle()
-   assertEquals(false, loader.isLoading)
+    assertEquals(listOf("1", "2"), list)
+  }
 }
