@@ -97,20 +97,20 @@ private class LoaderImpl : FLoader {
     _mutator.cancelMutate()
   }
 
-  private suspend fun <T> Mutator.MutateScope.doLoad(onLoad: suspend FLoader.LoadScope.() -> T): Result<T> {
+  private suspend fun <T> doLoad(onLoad: suspend FLoader.LoadScope.() -> T): Result<T> {
     val loadScope = LoadScopeImpl()
     return try {
       _stateFlow.update { it.copy(isLoading = true) }
       with(loadScope) { onLoad() }.let { data ->
         Result.success(data).also {
-          ensureMutateActive()
+          currentCoroutineContext().ensureActive()
           _stateFlow.update { it.copy(result = Result.success(Unit)) }
         }
       }
     } catch (e: Throwable) {
       if (e is CancellationException) throw e
       Result.failure<T>(e).also {
-        ensureMutateActive()
+        currentCoroutineContext().ensureActive()
         _stateFlow.update { it.copy(result = Result.failure(e)) }
       }
     } finally {
@@ -140,7 +140,7 @@ private class Mutator {
   private val _jobMutex = Mutex()
   private val _mutateMutex = Mutex()
 
-  suspend fun <T> mutate(block: suspend MutateScope.() -> T): T {
+  suspend fun <T> mutate(block: suspend () -> T): T {
     checkNested()
     return mutate(
       onStart = {},
@@ -148,7 +148,7 @@ private class Mutator {
     )
   }
 
-  suspend fun <T> mutateOrThrowCancellation(block: suspend MutateScope.() -> T): T {
+  suspend fun <T> mutateOrThrowCancellation(block: suspend () -> T): T {
     checkNested()
     return mutate(
       onStart = { if (_job?.isActive == true) throw CancellationException() },
@@ -163,10 +163,10 @@ private class Mutator {
     }
   }
 
-  private suspend fun <R> mutate(
+  private suspend fun <T> mutate(
     onStart: () -> Unit,
-    block: suspend MutateScope.() -> R,
-  ): R {
+    block: suspend () -> T,
+  ): T {
     return coroutineScope {
       val mutateContext = coroutineContext
       val mutateJob = checkNotNull(mutateContext[Job])
@@ -178,9 +178,7 @@ private class Mutator {
         mutateJob.invokeOnCompletion { releaseJob(mutateJob) }
       }
 
-      doMutate {
-        with(newMutateScope(mutateContext)) { block() }
-      }
+      doMutate(block)
     }
   }
 
@@ -199,15 +197,6 @@ private class Mutator {
     }
   }
 
-  private fun newMutateScope(mutateContext: CoroutineContext): MutateScope {
-    return object : MutateScope {
-      override suspend fun ensureMutateActive() {
-        currentCoroutineContext().ensureActive()
-        mutateContext.ensureActive()
-      }
-    }
-  }
-
   private suspend fun checkNested() {
     val element = currentCoroutineContext()[MutateElement]
     if (element?.mutator === this@Mutator) error("Nested invoke")
@@ -215,9 +204,5 @@ private class Mutator {
 
   private class MutateElement(val mutator: Mutator) : AbstractCoroutineContextElement(MutateElement) {
     companion object Key : CoroutineContext.Key<MutateElement>
-  }
-
-  interface MutateScope {
-    suspend fun ensureMutateActive()
   }
 }
