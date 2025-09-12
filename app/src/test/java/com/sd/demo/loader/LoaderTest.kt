@@ -157,6 +157,27 @@ class LoaderTest {
   }
 
   @Test
+  fun `test load when cancel loader in block`() = runTest {
+    val loader = FLoader()
+    var container = ""
+    launch {
+      loader.load {
+        assertEquals(true, loader.isLoading())
+        onLoadFinish {
+          assertEquals(false, loader.isLoading())
+          container += "onLoadFinish"
+        }
+        loader.cancel()
+      }
+    }.also { job ->
+      runCurrent()
+      assertEquals(true, job.isCancelled)
+      assertEquals(true, job.isCompleted)
+      assertEquals("onLoadFinish", container)
+    }
+  }
+
+  @Test
   fun `test loadingFlow`() = runTest {
     val loader = FLoader()
     loader.loadingFlow.test {
