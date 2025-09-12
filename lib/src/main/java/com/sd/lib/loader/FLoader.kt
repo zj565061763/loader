@@ -168,8 +168,7 @@ private class Mutator {
     block: suspend () -> T,
   ): T {
     return coroutineScope {
-      val mutateContext = coroutineContext
-      val mutateJob = checkNotNull(mutateContext[Job])
+      val mutateJob = coroutineContext[Job]!!
 
       _jobMutex.withLock {
         onStart()
