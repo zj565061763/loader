@@ -59,6 +59,12 @@ fun FLoader(): FLoader = LoaderImpl()
 val FLoader.loadingFlow: Flow<Boolean>
   get() = stateFlow.map { it.isLoading }.distinctUntilChanged()
 
+/** 对[runCatching]的包装，如果是取消异常则抛出 */
+inline fun <R> safeRunCatching(block: () -> R): Result<R> {
+  return runCatching(block)
+    .onFailure { if (it is CancellationException) throw it }
+}
+
 //-------------------- impl --------------------
 
 private class LoaderImpl : FLoader {
