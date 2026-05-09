@@ -200,9 +200,12 @@ private class Mutator {
   }
 
   private suspend fun cancelAndJoinEffectJobsWithLock() {
-    _effectJobs.forEach { it.cancel() }
-    _effectJobs.joinAll()
-    _effectJobs.clear()
+    try {
+      _effectJobs.forEach { it.cancel() }
+      _effectJobs.joinAll()
+    } finally {
+      _effectJobs.clear()
+    }
   }
 
   private inline fun tryLockJobMutex(block: () -> Unit) {
