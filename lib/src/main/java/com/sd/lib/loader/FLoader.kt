@@ -90,7 +90,7 @@ private class LoaderImpl : FLoader {
   }
 
   override suspend fun cancel() {
-    _mutator.cancelMutate()
+    _mutator.cancelAndJoin()
   }
 
   private suspend fun <T> doLoad(onLoad: suspend FLoader.LoadScope.() -> T): Result<T> {
@@ -160,7 +160,7 @@ private class Mutator {
     }
   }
 
-  suspend fun cancelMutate() {
+  suspend fun cancelAndJoin() {
     _jobMutex.withLock {
       _job?.cancelAndJoin()
       _job = null
