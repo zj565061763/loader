@@ -154,9 +154,7 @@ private class Mutator {
       val effectJob = coroutineContext[Job]!!
       _jobMutex.withLock {
         _effectJobs.add(effectJob)
-        effectJob.invokeOnCompletion {
-          tryLockJobMutex { _effectJobs.remove(effectJob) }
-        }
+        effectJob.invokeOnCompletion { tryLockJobMutex { _effectJobs.remove(effectJob) } }
       }
       doMutate(block)
     }
@@ -182,9 +180,7 @@ private class Mutator {
         _job?.cancelAndJoin()
         _job = mutateJob
         cancelAndJoinEffectJobsWithLock()
-        mutateJob.invokeOnCompletion {
-          tryLockJobMutex { if (_job === mutateJob) _job = null }
-        }
+        mutateJob.invokeOnCompletion { tryLockJobMutex { if (_job === mutateJob) _job = null } }
       }
 
       doMutate(block)
