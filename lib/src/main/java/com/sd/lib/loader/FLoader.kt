@@ -12,6 +12,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.joinAll
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
@@ -129,6 +130,7 @@ private class Mutator {
   private var _job: Job? = null
   private val _jobMutex = Mutex()
   private val _mutateMutex = Mutex()
+  private val _effectJobs = mutableSetOf<Job>()
 
   suspend fun <T> mutate(block: suspend () -> T): T {
     checkNested()
@@ -146,10 +148,25 @@ private class Mutator {
     )
   }
 
+  suspend fun <T> effect(block: suspend () -> T): T {
+    checkNested()
+    return coroutineScope {
+      val effectJob = coroutineContext[Job]!!
+      _jobMutex.withLock {
+        _effectJobs.add(effectJob)
+        effectJob.invokeOnCompletion {
+          tryLockJobMutex { _effectJobs.remove(effectJob) }
+        }
+      }
+      doMutate(block)
+    }
+  }
+
   suspend fun cancelMutate() {
     _jobMutex.withLock {
       _job?.cancelAndJoin()
       _job = null
+      cancelAndJoinEffectJobsWithLock()
     }
   }
 
@@ -164,7 +181,10 @@ private class Mutator {
         onStart()
         _job?.cancelAndJoin()
         _job = mutateJob
-        mutateJob.invokeOnCompletion { releaseJob(mutateJob) }
+        cancelAndJoinEffectJobsWithLock()
+        mutateJob.invokeOnCompletion {
+          tryLockJobMutex { if (_job === mutateJob) _job = null }
+        }
       }
 
       doMutate(block)
@@ -179,10 +199,19 @@ private class Mutator {
     }
   }
 
-  private fun releaseJob(job: Job) {
+  private suspend fun cancelAndJoinEffectJobsWithLock() {
+    _effectJobs.forEach { it.cancel() }
+    _effectJobs.joinAll()
+    _effectJobs.clear()
+  }
+
+  private inline fun tryLockJobMutex(block: () -> Unit) {
     if (_jobMutex.tryLock()) {
-      if (_job === job) _job = null
-      _jobMutex.unlock()
+      try {
+        block()
+      } finally {
+        _jobMutex.unlock()
+      }
     }
   }
 
