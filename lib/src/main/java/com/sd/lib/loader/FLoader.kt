@@ -179,8 +179,8 @@ private class Mutator {
         onStart()
         _job?.cancelAndJoin()
         _job = mutateJob
-        cancelAndJoinEffectJobsWithLock()
         mutateJob.invokeOnCompletion { tryLockJobMutex { if (_job === mutateJob) _job = null } }
+        cancelAndJoinEffectJobsWithLock()
       }
 
       doMutate(block)
