@@ -146,7 +146,7 @@ private class Mutator {
   private var _job: Job? = null
   private val _jobMutex = Mutex()
   private val _mutateMutex = Mutex()
-  private val _effectJobs = mutableSetOf<Job>()
+  private var _effectJobs: MutableCollection<Job>? = null
 
   suspend fun <T> mutate(block: suspend () -> T): T {
     checkNested()
@@ -169,8 +169,16 @@ private class Mutator {
     return coroutineScope {
       val effectJob = coroutineContext[Job]!!
       _jobMutex.withLock {
-        _effectJobs.add(effectJob)
-        effectJob.invokeOnCompletion { tryLockJobMutex { _effectJobs.remove(effectJob) } }
+        val effectJobs = _effectJobs ?: mutableSetOf<Job>().also { _effectJobs = it }
+        effectJobs.add(effectJob)
+        effectJob.invokeOnCompletion {
+          tryLockJobMutex {
+            _effectJobs?.also { jobs ->
+              jobs.remove(effectJob)
+              if (jobs.isEmpty()) _effectJobs = null
+            }
+          }
+        }
       }
       doMutate(block)
     }
@@ -212,12 +220,10 @@ private class Mutator {
   }
 
   private suspend fun cancelAndJoinEffectJobsWithLock() {
-    try {
-      _effectJobs.forEach { it.cancel() }
-      _effectJobs.joinAll()
-    } finally {
-      _effectJobs.clear()
-    }
+    val jobs = _effectJobs ?: return
+    _effectJobs = null
+    jobs.forEach { it.cancel() }
+    jobs.joinAll()
   }
 
   private inline fun tryLockJobMutex(block: () -> Unit) {
