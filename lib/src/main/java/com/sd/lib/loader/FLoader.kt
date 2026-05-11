@@ -40,6 +40,13 @@ interface FLoader {
   /** 如果正在加载中，会抛出[CancellationException] */
   suspend fun <T> tryLoad(onLoad: suspend LoadScope.() -> T): Result<T>
 
+  /**
+   * 调用[effect]的协程会按顺序执行，
+   * 如果调用[effect]时，[load]或[tryLoad]正在执行，则当前协程会挂起，
+   * [load]或[tryLoad]执行时，会取消所有[effect]协程
+   */
+  suspend fun <T> effect(onLoad: suspend () -> T): Result<T>
+
   /** 取消加载，并等待取消完成 */
   suspend fun cancel()
 
@@ -86,6 +93,15 @@ private class LoaderImpl : FLoader {
   override suspend fun <T> tryLoad(onLoad: suspend FLoader.LoadScope.() -> T): Result<T> {
     return _mutator.mutateOrThrowCancellation {
       doLoad(onLoad)
+    }
+  }
+
+  override suspend fun <T> effect(onLoad: suspend () -> T): Result<T> {
+    return try {
+      Result.success(_mutator.effect(onLoad))
+    } catch (e: Throwable) {
+      if (e is CancellationException) throw e
+      Result.failure(e)
     }
   }
 
