@@ -12,7 +12,6 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
-import kotlinx.coroutines.joinAll
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
@@ -39,13 +38,6 @@ interface FLoader {
 
   /** 如果正在加载中，会抛出[CancellationException] */
   suspend fun <T> tryLoad(onLoad: suspend LoadScope.() -> T): Result<T>
-
-  /**
-   * 调用[effect]的协程会按顺序执行，
-   * 如果调用[effect]时，[load]或[tryLoad]正在执行，则当前协程会挂起，
-   * [load]或[tryLoad]执行时，会取消所有[effect]协程
-   */
-  suspend fun <T> effect(onLoad: suspend () -> T): Result<T>
 
   /** 取消加载，并等待取消完成 */
   suspend fun cancel()
@@ -96,15 +88,6 @@ private class LoaderImpl : FLoader {
     }
   }
 
-  override suspend fun <T> effect(onLoad: suspend () -> T): Result<T> {
-    return try {
-      Result.success(_mutator.effect(onLoad))
-    } catch (e: Throwable) {
-      if (e is CancellationException) throw e
-      Result.failure(e)
-    }
-  }
-
   override suspend fun cancel() {
     _mutator.cancelAndJoin()
   }
@@ -146,7 +129,6 @@ private class Mutator {
   private var _job: Job? = null
   private val _jobMutex = Mutex()
   private val _mutateMutex = Mutex()
-  private var _effectJobs: MutableCollection<Job>? = null
 
   suspend fun <T> mutate(block: suspend () -> T): T {
     checkNested()
@@ -164,34 +146,10 @@ private class Mutator {
     )
   }
 
-  suspend fun <T> effect(block: suspend () -> T): T {
-    checkNested()
-    return coroutineScope {
-      val effectJob = coroutineContext[Job]!!
-
-      _jobMutex.withLock {
-        val effectJobs = _effectJobs ?: mutableSetOf<Job>().also { _effectJobs = it }
-        effectJobs.add(effectJob)
-        effectJob.invokeOnCompletion {
-          tryLockJobMutex {
-            _effectJobs?.also { jobs ->
-              jobs.remove(effectJob)
-              if (jobs.isEmpty()) _effectJobs = null
-            }
-          }
-        }
-      }
-
-      _job?.join()
-      doMutate(block)
-    }
-  }
-
   suspend fun cancelAndJoin() {
     _jobMutex.withLock {
       _job?.cancelAndJoin()
       _job = null
-      cancelAndJoinEffectJobsWithLock()
     }
   }
 
@@ -207,7 +165,6 @@ private class Mutator {
         _job?.cancelAndJoin()
         _job = mutateJob
         mutateJob.invokeOnCompletion { tryLockJobMutex { if (_job === mutateJob) _job = null } }
-        cancelAndJoinEffectJobsWithLock()
       }
 
       doMutate(block)
@@ -220,13 +177,6 @@ private class Mutator {
         block()
       }
     }
-  }
-
-  private suspend fun cancelAndJoinEffectJobsWithLock() {
-    val jobs = _effectJobs ?: return
-    _effectJobs = null
-    jobs.forEach { it.cancel() }
-    jobs.joinAll()
   }
 
   private inline fun tryLockJobMutex(block: () -> Unit) {
