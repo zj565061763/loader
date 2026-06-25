@@ -168,6 +168,7 @@ private class Mutator {
     checkNested()
     return coroutineScope {
       val effectJob = coroutineContext[Job]!!
+
       _jobMutex.withLock {
         val effectJobs = _effectJobs ?: mutableSetOf<Job>().also { _effectJobs = it }
         effectJobs.add(effectJob)
@@ -180,6 +181,8 @@ private class Mutator {
           }
         }
       }
+
+      _job?.join()
       doMutate(block)
     }
   }
