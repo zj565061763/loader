@@ -152,6 +152,7 @@ private class Mutator {
   private suspend fun <T> doMutate(block: suspend () -> T): T {
     return _mutateMutex.withLock {
       withContext(MutateElement(mutator = this@Mutator)) {
+        currentCoroutineContext().ensureActive()
         block()
       }
     }
