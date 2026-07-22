@@ -34,10 +34,10 @@ interface FLoader {
    *
    * @param onLoad 加载回调
    */
-  suspend fun <T> load(onLoad: suspend LoadScope.() -> T): Result<T>
+  suspend fun <T> load(onLoad: suspend () -> T): Result<T>
 
   /** 如果正在加载中，会抛出[CancellationException] */
-  suspend fun <T> tryLoad(onLoad: suspend LoadScope.() -> T): Result<T>
+  suspend fun <T> tryLoad(onLoad: suspend () -> T): Result<T>
 
   /** 取消加载，并等待取消完成 */
   suspend fun cancel()
@@ -46,11 +46,6 @@ interface FLoader {
     /** 是否正在加载中 */
     val isLoading: Boolean = false,
   )
-
-  interface LoadScope {
-    /** 加载成功，加载失败，或者加载被取消，都会在最后触发[block] */
-    fun onLoadFinish(block: () -> Unit)
-  }
 }
 
 fun FLoader(): FLoader = LoaderImpl()
@@ -76,13 +71,13 @@ private class LoaderImpl : FLoader {
     return _stateFlow.value.isLoading
   }
 
-  override suspend fun <T> load(onLoad: suspend FLoader.LoadScope.() -> T): Result<T> {
+  override suspend fun <T> load(onLoad: suspend () -> T): Result<T> {
     return _mutator.mutate {
       doLoad(onLoad)
     }
   }
 
-  override suspend fun <T> tryLoad(onLoad: suspend FLoader.LoadScope.() -> T): Result<T> {
+  override suspend fun <T> tryLoad(onLoad: suspend () -> T): Result<T> {
     return _mutator.mutateOrThrowCancellation {
       doLoad(onLoad)
     }
@@ -92,11 +87,10 @@ private class LoaderImpl : FLoader {
     _mutator.cancelAndJoin()
   }
 
-  private suspend fun <T> doLoad(onLoad: suspend FLoader.LoadScope.() -> T): Result<T> {
-    val loadScope = LoadScopeImpl()
+  private suspend fun <T> doLoad(onLoad: suspend () -> T): Result<T> {
     return try {
       _stateFlow.update { it.copy(isLoading = true) }
-      with(loadScope) { onLoad() }.let { data ->
+      onLoad().let { data ->
         currentCoroutineContext().ensureActive()
         Result.success(data)
       }
@@ -105,22 +99,6 @@ private class LoaderImpl : FLoader {
       Result.failure(e)
     } finally {
       _stateFlow.update { it.copy(isLoading = false) }
-      loadScope.notifyLoadFinish()
-    }
-  }
-
-  private class LoadScopeImpl : FLoader.LoadScope {
-    private var _onLoadFinishBlock: (() -> Unit)? = null
-
-    override fun onLoadFinish(block: () -> Unit) {
-      _onLoadFinishBlock = block
-    }
-
-    fun notifyLoadFinish() {
-      _onLoadFinishBlock?.also { finishBlock ->
-        _onLoadFinishBlock = null
-        finishBlock()
-      }
     }
   }
 }
