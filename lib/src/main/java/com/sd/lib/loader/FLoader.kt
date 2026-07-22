@@ -36,8 +36,8 @@ interface FLoader {
    */
   suspend fun <T> load(onLoad: suspend () -> T): Result<T>
 
-  /** 如果正在加载中，会抛出[CancellationException] */
-  suspend fun <T> tryLoad(onLoad: suspend () -> T): Result<T>
+  /** 如果正在加载中，则返回null */
+  suspend fun <T> tryLoad(onLoad: suspend () -> T): Result<T>?
 
   /** 取消加载，并等待取消完成 */
   suspend fun cancel()
@@ -77,9 +77,13 @@ private class LoaderImpl : FLoader {
     }
   }
 
-  override suspend fun <T> tryLoad(onLoad: suspend () -> T): Result<T> {
-    return _mutator.mutateOrThrowCancellation {
-      doLoad(onLoad)
+  override suspend fun <T> tryLoad(onLoad: suspend () -> T): Result<T>? {
+    return try {
+      _mutator.mutateOrThrow {
+        doLoad(onLoad)
+      }
+    } catch (_: Mutator.MutatorBusyException) {
+      null
     }
   }
 
@@ -116,10 +120,11 @@ private class Mutator {
     )
   }
 
-  suspend fun <T> mutateOrThrowCancellation(block: suspend () -> T): T {
+  @Throws(MutatorBusyException::class)
+  suspend fun <T> mutateOrThrow(block: suspend () -> T): T {
     checkNested()
     return mutate(
-      onStart = { if (_job?.isActive == true) throw CancellationException() },
+      onStart = { if (_job?.isActive == true) throw MutatorBusyException() },
       block = block,
     )
   }
@@ -176,4 +181,6 @@ private class Mutator {
   private class MutateElement(val mutator: Mutator) : AbstractCoroutineContextElement(MutateElement) {
     companion object Key : CoroutineContext.Key<MutateElement>
   }
+
+  class MutatorBusyException : Exception()
 }
