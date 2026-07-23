@@ -3,6 +3,7 @@ package com.sd.demo.loader
 import app.cash.turbine.test
 import com.sd.lib.loader.FLoader
 import com.sd.lib.loader.loadingFlow
+import com.sd.lib.loader.safeRunCatching
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.cancelAndJoin
@@ -262,6 +263,81 @@ class LoaderTest {
       otherLoader.load { 1 }
     }.also { result ->
       assertEquals(1, result.getOrThrow().getOrThrow())
+    }
+  }
+
+  @Test
+  fun `test tryLoad when error in block`() = runTest {
+    val loader = FLoader()
+    loader.tryLoad {
+      assertEquals(true, loader.isLoading())
+      error("error in block")
+    }.also { result ->
+      assertEquals("error in block", result.exceptionOrNull()!!.message)
+    }
+    assertEquals(false, loader.isLoading())
+  }
+
+  @Test
+  fun `test tryLoad when busy not cancel loading`() = runTest {
+    val loader = FLoader()
+    var container = ""
+
+    val job = launch {
+      loader.load {
+        try {
+          delay(Long.MAX_VALUE)
+        } finally {
+          container += "1"
+        }
+      }
+    }.also {
+      runCurrent()
+    }
+
+    runCatching { loader.tryLoad { } }
+    assertEquals(true, loader.isLoading())
+    assertEquals("", container)
+    assertEquals(false, job.isCancelled)
+
+    job.cancelAndJoin()
+    assertEquals("1", container)
+  }
+
+  @Test
+  fun `test cancel when idle`() = runTest {
+    val loader = FLoader()
+    loader.cancel()
+    assertEquals(false, loader.isLoading())
+    loader.load { 1 }.also { result ->
+      assertEquals(1, result.getOrThrow())
+    }
+  }
+
+  @Test
+  fun `test stateFlow`() = runTest {
+    val loader = FLoader()
+    assertEquals(FLoader.State(isLoading = false), loader.stateFlow.value)
+    loader.load {
+      assertEquals(FLoader.State(isLoading = true), loader.stateFlow.value)
+    }
+    assertEquals(FLoader.State(isLoading = false), loader.stateFlow.value)
+  }
+
+  @Test
+  fun `test safeRunCatching`() = runTest {
+    safeRunCatching { 1 }.also { result ->
+      assertEquals(1, result.getOrThrow())
+    }
+
+    safeRunCatching { error("error in block") }.also { result ->
+      assertEquals("error in block", result.exceptionOrNull()!!.message)
+    }
+
+    runCatching {
+      safeRunCatching { throw CancellationException() }
+    }.also { result ->
+      assertEquals(true, result.exceptionOrNull() is CancellationException)
     }
   }
 }
