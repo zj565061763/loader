@@ -36,7 +36,7 @@ interface FLoader {
    */
   suspend fun <T> load(onLoad: suspend () -> T): Result<T>
 
-  /** 如果正在加载中，则抛出[BusyCancellationException] */
+  /** 如果正在加载中，则抛出[BusyCancellationException]，该异常是[CancellationException]，不捕获会静默取消调用协程 */
   suspend fun <T> tryLoad(onLoad: suspend () -> T): Result<T>
 
   /** 取消加载，并等待取消完成 */

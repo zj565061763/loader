@@ -194,13 +194,15 @@ class LoaderTest {
       runCurrent()
     }
 
-    assertEquals(null, loader.tryLoad { 1 })
+    runCatching { loader.tryLoad { 1 } }.also { result ->
+      assertEquals(true, result.exceptionOrNull() is FLoader.BusyCancellationException)
+    }
     assertEquals(true, loader.isLoading())
 
     job.cancelAndJoin()
 
     loader.tryLoad { 2 }.also { result ->
-      assertEquals(2, result!!.getOrThrow())
+      assertEquals(2, result.getOrThrow())
     }
   }
 
