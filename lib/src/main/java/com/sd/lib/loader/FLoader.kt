@@ -36,8 +36,8 @@ interface FLoader {
    */
   suspend fun <T> load(onLoad: suspend () -> T): Result<T>
 
-  /** 如果正在加载中，则返回null */
-  suspend fun <T> tryLoad(onLoad: suspend () -> T): Result<T>?
+  /** 如果正在加载中，则抛出[BusyCancellationException] */
+  suspend fun <T> tryLoad(onLoad: suspend () -> T): Result<T>
 
   /** 取消加载，并等待取消完成 */
   suspend fun cancel()
@@ -46,6 +46,9 @@ interface FLoader {
     /** 是否正在加载中 */
     val isLoading: Boolean = false,
   )
+
+  /** [FLoader.tryLoad] */
+  class BusyCancellationException : CancellationException()
 }
 
 fun FLoader(): FLoader = LoaderImpl()
@@ -77,13 +80,13 @@ private class LoaderImpl : FLoader {
     }
   }
 
-  override suspend fun <T> tryLoad(onLoad: suspend () -> T): Result<T>? {
+  override suspend fun <T> tryLoad(onLoad: suspend () -> T): Result<T> {
     return try {
       _mutator.mutateOrThrow {
         doLoad(onLoad)
       }
     } catch (_: Mutator.BusyException) {
-      null
+      throw FLoader.BusyCancellationException()
     }
   }
 
