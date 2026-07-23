@@ -22,13 +22,16 @@ interface FLoader {
    * 开始加载，如果上一次加载还未完成，再次调用此方法，会取消上一次加载，
    * [onLoad]的异常会被捕获，除了[CancellationException]
    *
-   * 注意：[onLoad]中不允许嵌套调用[load]，否则会抛异常
+   * 注意：[onLoad]中不允许嵌套调用[load]，[tryLoad]，[cancelAndJoin]，否则会抛异常
    *
    * @param onLoad 加载回调
    */
   suspend fun <T> load(onLoad: suspend () -> T): Result<T>
 
-  /** 如果正在加载中，则抛出[BusyCancellationException]，该异常是[CancellationException]，不捕获会静默取消调用协程 */
+  /**
+   * 功能和[load]类似
+   * 区别是：如果正在加载中，则抛出[BusyCancellationException]，它是[CancellationException]的子类，不捕获会静默取消调用协程
+   */
   suspend fun <T> tryLoad(onLoad: suspend () -> T): Result<T>
 
   /** 取消加载，并等待取消完成 */
