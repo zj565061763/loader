@@ -19,14 +19,6 @@ class FMutex {
     }
   }
 
-  fun tryLock(): Boolean {
-    return _mutex.tryLock()
-  }
-
-  fun unlock() {
-    _mutex.unlock()
-  }
-
   suspend fun checkNested() {
     if (currentCoroutineContext()[_nestedKey] != null) error("Nested invoke")
   }

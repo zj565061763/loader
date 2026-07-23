@@ -97,40 +97,6 @@ class MutexTest {
   }
 
   @Test
-  fun `test tryLock when free`() = runTest {
-    val mutex = FMutex()
-    assertEquals(true, mutex.tryLock())
-    mutex.unlock()
-  }
-
-  @Test
-  fun `test tryLock when locked`() = runTest {
-    val mutex = FMutex()
-    val job = launch {
-      mutex.withLock { delay(Long.MAX_VALUE) }
-    }.also { runCurrent() }
-
-    // 已被 withLock 持有，tryLock 应失败
-    assertEquals(false, mutex.tryLock())
-
-    job.cancel()
-  }
-
-  @Test
-  fun `test tryLock then unlock releases lock`() = runTest {
-    val mutex = FMutex()
-    assertEquals(true, mutex.tryLock())
-    // 未 unlock 前再次 tryLock 应失败
-    assertEquals(false, mutex.tryLock())
-    mutex.unlock()
-    // unlock 后锁应可再次获取
-    assertEquals(true, mutex.tryLock())
-    mutex.unlock()
-    // 也可被 withLock 获取
-    assertEquals(3, mutex.withLock { 3 })
-  }
-
-  @Test
   fun `test checkNested outside withLock`() = runTest {
     val mutex = FMutex()
     // 不在 withLock 内部调用不应抛异常
