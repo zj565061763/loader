@@ -26,7 +26,7 @@ class FMutator {
   suspend fun <T> mutateOrThrow(block: suspend () -> T): T {
     _mutateMutex.checkNested()
     return mutate(
-      onStart = { if (_job?.isActive == true) throw BusyException() },
+      onStart = { if (_job?.isCompleted == false) throw BusyException() },
       block = block,
     )
   }

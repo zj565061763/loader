@@ -2,11 +2,13 @@ package com.sd.demo.loader
 
 import com.sd.lib.loader.FMutator
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
@@ -93,6 +95,35 @@ class MutatorTest {
 
     job.cancelAndJoin()
     assertEquals("1", container)
+  }
+
+  @Test
+  fun `test mutateOrThrow busy while previous is cancelling`() = runTest {
+    val mutator = FMutator()
+
+    val job = launch {
+      mutator.mutate {
+        try {
+          delay(Long.MAX_VALUE)
+        } finally {
+          // 慢清理，使旧任务停留在 Cancelling 状态
+          withContext(NonCancellable) { delay(1_000) }
+        }
+      }
+    }.also { runCurrent() }
+
+    // fire-and-forget 取消，旧任务进入 Cancelling（isCompleted == false）
+    mutator.cancel()
+    runCurrent()
+
+    // 旧任务还在清理，mutateOrThrow 应立即报忙、不阻塞等待其清理完成
+    runCatching {
+      mutator.mutateOrThrow { 1 }
+    }.also { result ->
+      assertEquals(true, result.exceptionOrNull() is FMutator.BusyException)
+    }
+
+    job.cancel()
   }
 
   @Test
