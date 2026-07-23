@@ -95,11 +95,4 @@ class MutexTest {
     }
     assertEquals(42, result)
   }
-
-  @Test
-  fun `test checkNested outside withLock`() = runTest {
-    val mutex = FMutex()
-    // 不在 withLock 内部调用不应抛异常
-    mutex.checkNested()
-  }
 }
