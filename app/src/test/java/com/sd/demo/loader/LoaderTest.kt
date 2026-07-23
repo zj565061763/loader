@@ -86,7 +86,7 @@ class LoaderTest {
       }
     }.also { job ->
       runCurrent()
-      loader.cancel()
+      loader.cancelAndJoin()
       assertEquals(true, job.isCancelled)
       assertEquals(true, job.isCompleted)
       assertEquals("1", container)
@@ -130,7 +130,7 @@ class LoaderTest {
     val loader = FLoader()
     launch {
       loader.load {
-        loader.cancel()
+        loader.cancelAndJoin()
       }
     }.also { job ->
       runCurrent()
@@ -177,7 +177,7 @@ class LoaderTest {
         loader.load { delay(Long.MAX_VALUE) }
       }.also {
         runCurrent()
-        loader.cancel()
+        loader.cancelAndJoin()
       }
       assertEquals(false, awaitItem())
       assertEquals(true, awaitItem())
@@ -307,7 +307,7 @@ class LoaderTest {
   @Test
   fun `test cancel when idle`() = runTest {
     val loader = FLoader()
-    loader.cancel()
+    loader.cancelAndJoin()
     assertEquals(false, loader.isLoading())
     loader.load { 1 }.also { result ->
       assertEquals(1, result.getOrThrow())

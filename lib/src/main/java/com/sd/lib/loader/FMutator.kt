@@ -9,6 +9,7 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 
 class FMutator {
+  @Volatile
   private var _job: Job? = null
   private val _jobMutex = Mutex()
   private val _mutateMutex = FMutex()
@@ -31,10 +32,15 @@ class FMutator {
   }
 
   suspend fun cancelAndJoin() {
+    _mutateMutex.checkNested()
     _jobMutex.withLock {
       _job?.cancelAndJoin()
       _job = null
     }
+  }
+
+  fun cancel() {
+    _job?.cancel()
   }
 
   private suspend fun <T> mutate(
