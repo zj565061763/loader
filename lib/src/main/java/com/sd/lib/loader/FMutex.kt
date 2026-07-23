@@ -19,8 +19,12 @@ class FMutex {
     }
   }
 
-  fun <T> tryLock(block: () -> T): T? {
-    return _mutex.extTryLock(block)
+  fun tryLock(): Boolean {
+    return _mutex.tryLock()
+  }
+
+  fun unlock() {
+    _mutex.unlock()
   }
 
   suspend fun checkNested() {
@@ -30,13 +34,4 @@ class FMutex {
   private val _nestedKey = object : CoroutineContext.Key<NestedElement> {}
 
   private class NestedElement(key: CoroutineContext.Key<NestedElement>) : AbstractCoroutineContextElement(key)
-}
-
-fun <T> Mutex.extTryLock(block: () -> T): T? {
-  if (!tryLock()) return null
-  return try {
-    block()
-  } finally {
-    unlock()
-  }
 }

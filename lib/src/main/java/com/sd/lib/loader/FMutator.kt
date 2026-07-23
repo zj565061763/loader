@@ -55,7 +55,10 @@ class FMutator {
         _job?.cancelAndJoin()
         _job = mutateJob
         mutateJob.invokeOnCompletion {
-          _jobMutex.extTryLock { if (_job === mutateJob) _job = null }
+          if (_jobMutex.tryLock()) {
+            if (_job === mutateJob) _job = null
+            _jobMutex.unlock()
+          }
         }
       }
 

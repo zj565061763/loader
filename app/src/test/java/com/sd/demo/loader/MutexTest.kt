@@ -99,7 +99,8 @@ class MutexTest {
   @Test
   fun `test tryLock when free`() = runTest {
     val mutex = FMutex()
-    assertEquals(1, mutex.tryLock { 1 })
+    assertEquals(true, mutex.tryLock())
+    mutex.unlock()
   }
 
   @Test
@@ -109,17 +110,23 @@ class MutexTest {
       mutex.withLock { delay(Long.MAX_VALUE) }
     }.also { runCurrent() }
 
-    assertEquals(null, mutex.tryLock { 1 })
+    // 已被 withLock 持有，tryLock 应失败
+    assertEquals(false, mutex.tryLock())
 
     job.cancel()
   }
 
   @Test
-  fun `test tryLock releases lock`() = runTest {
+  fun `test tryLock then unlock releases lock`() = runTest {
     val mutex = FMutex()
-    assertEquals(1, mutex.tryLock { 1 })
-    // tryLock 结束后锁应已释放
-    assertEquals(2, mutex.tryLock { 2 })
+    assertEquals(true, mutex.tryLock())
+    // 未 unlock 前再次 tryLock 应失败
+    assertEquals(false, mutex.tryLock())
+    mutex.unlock()
+    // unlock 后锁应可再次获取
+    assertEquals(true, mutex.tryLock())
+    mutex.unlock()
+    // 也可被 withLock 获取
     assertEquals(3, mutex.withLock { 3 })
   }
 
