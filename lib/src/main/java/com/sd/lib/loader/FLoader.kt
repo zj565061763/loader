@@ -156,7 +156,7 @@ private class Mutator {
 
   private suspend fun <T> doMutate(block: suspend () -> T): T {
     return _mutateMutex.withLock {
-      withContext(MutateElement(mutator = this@Mutator)) {
+      withContext(MutateElement(_mutateKey)) {
         currentCoroutineContext().ensureActive()
         block()
       }
@@ -174,13 +174,12 @@ private class Mutator {
   }
 
   private suspend fun checkNested() {
-    val element = currentCoroutineContext()[MutateElement]
-    if (element?.mutator === this@Mutator) error("Nested invoke")
+    if (currentCoroutineContext()[_mutateKey] != null) error("Nested invoke")
   }
 
-  private class MutateElement(val mutator: Mutator) : AbstractCoroutineContextElement(MutateElement) {
-    companion object Key : CoroutineContext.Key<MutateElement>
-  }
+  private val _mutateKey = object : CoroutineContext.Key<MutateElement> {}
+
+  private class MutateElement(key: CoroutineContext.Key<MutateElement>) : AbstractCoroutineContextElement(key)
 
   class MutatorBusyException : Exception()
 }
