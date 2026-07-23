@@ -1,8 +1,5 @@
 package com.sd.lib.loader
 
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.cancelAndJoin
-import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.Flow
@@ -12,11 +9,6 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
-import kotlinx.coroutines.withContext
-import kotlin.coroutines.AbstractCoroutineContextElement
-import kotlin.coroutines.CoroutineContext
 import kotlin.coroutines.cancellation.CancellationException
 
 interface FLoader {
@@ -66,7 +58,7 @@ inline fun <R> safeRunCatching(block: () -> R): Result<R> {
 //-------------------- impl --------------------
 
 private class LoaderImpl : FLoader {
-  private val _mutator = Mutator()
+  private val _mutator = FMutator()
   private val _stateFlow = MutableStateFlow(FLoader.State())
   override val stateFlow: StateFlow<FLoader.State> = _stateFlow.asStateFlow()
 
@@ -85,7 +77,7 @@ private class LoaderImpl : FLoader {
       _mutator.mutateOrThrow {
         doLoad(onLoad)
       }
-    } catch (_: Mutator.BusyException) {
+    } catch (_: FMutator.BusyException) {
       throw FLoader.BusyCancellationException()
     }
   }
@@ -108,81 +100,4 @@ private class LoaderImpl : FLoader {
       _stateFlow.update { it.copy(isLoading = false) }
     }
   }
-}
-
-private class Mutator {
-  private var _job: Job? = null
-  private val _jobMutex = Mutex()
-  private val _mutateMutex = Mutex()
-
-  suspend fun <T> mutate(block: suspend () -> T): T {
-    checkNested()
-    return mutate(
-      onStart = {},
-      block = block,
-    )
-  }
-
-  @Throws(BusyException::class)
-  suspend fun <T> mutateOrThrow(block: suspend () -> T): T {
-    checkNested()
-    return mutate(
-      onStart = { if (_job?.isActive == true) throw BusyException() },
-      block = block,
-    )
-  }
-
-  suspend fun cancelAndJoin() {
-    _jobMutex.withLock {
-      _job?.cancelAndJoin()
-      _job = null
-    }
-  }
-
-  private suspend fun <T> mutate(
-    onStart: () -> Unit,
-    block: suspend () -> T,
-  ): T {
-    return coroutineScope {
-      val mutateJob = coroutineContext[Job]!!
-
-      _jobMutex.withLock {
-        onStart()
-        _job?.cancelAndJoin()
-        _job = mutateJob
-        mutateJob.invokeOnCompletion { tryLockJobMutex { if (_job === mutateJob) _job = null } }
-      }
-
-      doMutate(block)
-    }
-  }
-
-  private suspend fun <T> doMutate(block: suspend () -> T): T {
-    return _mutateMutex.withLock {
-      withContext(MutateElement(_mutateKey)) {
-        currentCoroutineContext().ensureActive()
-        block()
-      }
-    }
-  }
-
-  private inline fun tryLockJobMutex(block: () -> Unit) {
-    if (_jobMutex.tryLock()) {
-      try {
-        block()
-      } finally {
-        _jobMutex.unlock()
-      }
-    }
-  }
-
-  private suspend fun checkNested() {
-    if (currentCoroutineContext()[_mutateKey] != null) error("Nested invoke")
-  }
-
-  private val _mutateKey = object : CoroutineContext.Key<MutateElement> {}
-
-  private class MutateElement(key: CoroutineContext.Key<MutateElement>) : AbstractCoroutineContextElement(key)
-
-  class BusyException : Exception()
 }
