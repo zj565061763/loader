@@ -82,7 +82,7 @@ private class LoaderImpl : FLoader {
       _mutator.mutateOrThrow {
         doLoad(onLoad)
       }
-    } catch (_: Mutator.MutatorBusyException) {
+    } catch (_: Mutator.BusyException) {
       null
     }
   }
@@ -120,11 +120,11 @@ private class Mutator {
     )
   }
 
-  @Throws(MutatorBusyException::class)
+  @Throws(BusyException::class)
   suspend fun <T> mutateOrThrow(block: suspend () -> T): T {
     checkNested()
     return mutate(
-      onStart = { if (_job?.isActive == true) throw MutatorBusyException() },
+      onStart = { if (_job?.isActive == true) throw BusyException() },
       block = block,
     )
   }
@@ -181,5 +181,5 @@ private class Mutator {
 
   private class MutateElement(key: CoroutineContext.Key<MutateElement>) : AbstractCoroutineContextElement(key)
 
-  class MutatorBusyException : Exception()
+  class BusyException : Exception()
 }
