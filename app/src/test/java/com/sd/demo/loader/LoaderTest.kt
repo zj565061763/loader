@@ -7,9 +7,11 @@ import com.sd.lib.loader.safeRunCatching
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
@@ -126,18 +128,29 @@ class LoaderTest {
   }
 
   @Test
-  fun `test load when cancel loader in block`() = runTest {
+  fun `test cancelAndJoin in block`() = runTest {
     val loader = FLoader()
-    launch {
-      loader.load {
+    loader.load {
+      loader.cancelAndJoin()
+    }.also { result ->
+      // block 内嵌套调用 cancelAndJoin 会被拦截，避免自 join 死锁
+      assertEquals("Nested invoke", result.exceptionOrNull()!!.message)
+    }
+    assertEquals(false, loader.isLoading())
+  }
+
+  @Test
+  fun `test cancelAndJoin in block with NonCancellable`() = runTest {
+    val loader = FLoader()
+    // 即使用 NonCancellable 包裹，也不会死锁，而是抛出 Nested invoke
+    loader.load {
+      withContext(NonCancellable) {
         loader.cancelAndJoin()
       }
-    }.also { job ->
-      runCurrent()
-      assertEquals(true, job.isCancelled)
-      assertEquals(true, job.isCompleted)
-      assertEquals(false, loader.isLoading())
+    }.also { result ->
+      assertEquals("Nested invoke", result.exceptionOrNull()!!.message)
     }
+    assertEquals(false, loader.isLoading())
   }
 
   @Test

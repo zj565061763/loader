@@ -126,6 +126,63 @@ class MutatorTest {
   }
 
   @Test
+  fun `test nested cancelAndJoin`() = runTest {
+    val mutator = FMutator()
+    var message = "none"
+    // block 内嵌套调用 cancelAndJoin 会被拦截，避免自 join 死锁
+    mutator.mutate {
+      runCatching {
+        mutator.cancelAndJoin()
+      }.also {
+        message = it.exceptionOrNull()!!.message!!
+      }
+    }
+    assertEquals("Nested invoke", message)
+  }
+
+  @Test
+  fun `test cancel`() = runTest {
+    val mutator = FMutator()
+    var container = ""
+
+    val job = launch {
+      mutator.mutate {
+        try {
+          delay(Long.MAX_VALUE)
+        } finally {
+          container += "1"
+        }
+      }
+    }.also { runCurrent() }
+
+    // cancel 只标记取消，不 join
+    mutator.cancel()
+    job.join()
+
+    assertEquals(true, job.isCancelled)
+    assertEquals("1", container)
+
+    // 取消后仍可复用
+    assertEquals(2, mutator.mutate { 2 })
+  }
+
+  @Test
+  fun `test cancel in block`() = runTest {
+    val mutator = FMutator()
+    // block 内调用 cancel 可自取消，不会死锁，也不抛 Nested invoke
+    launch {
+      mutator.mutate {
+        mutator.cancel()
+        delay(1)
+      }
+    }.also { job ->
+      runCurrent()
+      assertEquals(true, job.isCancelled)
+      assertEquals(true, job.isCompleted)
+    }
+  }
+
+  @Test
   fun `test mutate when throw CancellationException in block`() = runTest {
     val mutator = FMutator()
     launch {
