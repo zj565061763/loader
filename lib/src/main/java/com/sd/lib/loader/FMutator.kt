@@ -9,7 +9,6 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 
 internal class FMutator {
-  @Volatile
   private var _job: Job? = null
   private val _jobMutex = Mutex()
   private val _mutateMutex = FMutex()
