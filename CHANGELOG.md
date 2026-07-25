@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.7.1
+
+### 📝 Documentation
+
+- **补充嵌套检测的说明**：嵌套检测基于协程上下文实现，在 `onLoad` 中通过 `runBlocking` 嵌套调用 `load` / `tryLoad` / `cancelAndJoin`，不会被检测到。
+
+### 🔧 Internal
+
+- **移除 `FMutator._job` 上多余的 `@Volatile`**：该字段的读写均在 `Mutex` 保护下进行，无需额外的可见性标注。
+
 ## 1.7.0
 
 ### ⚠️ Breaking Changes
