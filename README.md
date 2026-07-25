@@ -5,3 +5,7 @@
 ```kotlin
 implementation("io.github.zj565061763.android:loader:$version")
 ```
+
+# Changelog
+
+版本更新记录：[CHANGELOG.md](CHANGELOG.md)
