@@ -9,6 +9,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.runBlocking
 import kotlin.coroutines.cancellation.CancellationException
 
 interface FLoader {
@@ -22,7 +23,8 @@ interface FLoader {
    * 开始加载，如果上一次加载还未完成，再次调用此方法，会取消上一次加载，
    * [onLoad]的异常会被捕获，除了[CancellationException]
    *
-   * 注意：[onLoad]中不允许嵌套调用[load]，[tryLoad]，[cancelAndJoin]，否则会抛异常
+   * 注意：[onLoad]中不允许嵌套调用[load]，[tryLoad]，[cancelAndJoin]，否则会抛异常，
+   * 嵌套检测基于协程上下文实现，在[onLoad]中通过[runBlocking]嵌套调用，不会被检测到
    *
    * @param onLoad 加载回调
    */
