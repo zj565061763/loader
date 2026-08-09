@@ -24,7 +24,7 @@ interface FLoader {
    * [onLoad]的异常会被捕获，除了[CancellationException]
    *
    * 注意：[onLoad]中不允许嵌套调用[load]，[tryLoad]，[cancelAndJoin]，否则会抛异常，
-   * 嵌套检测基于协程上下文实现，在[onLoad]中通过[runBlocking]嵌套调用，不会被检测到
+   * 嵌套检测基于协程上下文实现，绕开协程上下文的嵌套调用（例如[runBlocking]，新开线程）检测不到，会死锁
    *
    * @param onLoad 加载回调
    */
