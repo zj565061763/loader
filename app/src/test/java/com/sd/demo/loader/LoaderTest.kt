@@ -601,6 +601,35 @@ class LoaderTest {
   }
 
   @Test
+  fun `test concurrent cancelAndJoin and tryLoad when idle`() = runTest {
+    withContext(Dispatchers.Default) {
+      repeat(100) {
+        val loader = FLoader()
+        val start = CompletableDeferred<Unit>()
+
+        coroutineScope {
+          val cancelJobs = List(8) {
+            async {
+              start.await()
+              loader.cancelAndJoin()
+            }
+          }
+          val tryLoadJob = async {
+            start.await()
+            runCatching { loader.tryLoad { yield() }.getOrThrow() }.exceptionOrNull()
+          }
+
+          start.complete(Unit)
+          cancelJobs.awaitAll()
+
+          // 空闲取消不能占用任务锁并导致 tryLoad 误报忙
+          assertEquals(false, tryLoadJob.await() is FLoader.BusyCancellationException)
+        }
+      }
+    }
+  }
+
+  @Test
   fun `test cancel when idle`() = runTest {
     val loader = FLoader()
     loader.cancelAndJoin()
