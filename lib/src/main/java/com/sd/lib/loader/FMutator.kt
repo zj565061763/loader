@@ -12,6 +12,8 @@ import java.util.concurrent.atomic.AtomicReference
 internal class FMutator {
   private val _job = AtomicReference<Job?>()
   private val _jobMutex = Mutex()
+
+  /** 串行执行用户 block，并提供同一实例的嵌套调用检测 */
   private val _mutateMutex = FMutex()
 
   suspend fun <T> mutate(block: suspend () -> T): T {

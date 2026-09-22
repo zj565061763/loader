@@ -7,13 +7,15 @@ import kotlinx.coroutines.withContext
 import kotlin.coroutines.AbstractCoroutineContextElement
 import kotlin.coroutines.CoroutineContext
 
+/**
+ * 提供互斥执行，并阻止同一实例在锁内嵌套调用。
+ *
+ * 嵌套检测依赖协程上下文，通过 `runBlocking` 或新线程绕开原上下文时无法检测，可能导致死锁。
+ */
 class FMutex {
   private val _mutex = Mutex()
 
-  /**
-   * [withLock]中不允许嵌套调用[withLock]，否则会抛异常[IllegalStateException]，
-   * 嵌套检测基于协程上下文实现，绕开协程上下文的嵌套调用（例如runBlocking，新开线程）检测不到，会死锁
-   */
+  /** 在互斥锁内执行[action]，同一实例嵌套调用时抛出[IllegalStateException] */
   suspend fun <T> withLock(action: suspend () -> T): T {
     checkNested()
     return _mutex.withLock {

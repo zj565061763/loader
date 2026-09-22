@@ -12,6 +12,7 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.runBlocking
 import kotlin.coroutines.cancellation.CancellationException
 
+/** 协调加载任务，支持取消旧任务或在繁忙时拒绝新任务 */
 interface FLoader {
   /** 状态流 */
   val stateFlow: StateFlow<State>
@@ -20,19 +21,23 @@ interface FLoader {
   fun isLoading(): Boolean
 
   /**
-   * 开始加载，如果上一次加载还未完成，再次调用此方法，会取消上一次加载，
-   * [onLoad]的异常会被捕获，除了[CancellationException]
+   * 开始加载，并取消和等待上一次加载结束。
    *
-   * 注意：[onLoad]中不允许嵌套调用[load]，[tryLoad]，[cancelAndJoin]，否则会抛异常，
-   * 嵌套检测基于协程上下文实现，绕开协程上下文的嵌套调用（例如[runBlocking]，新开线程）检测不到，会死锁
+   * 被新调用取消的[load]会抛出[CancellationException]，不会返回[Result]。
+   * [onLoad]抛出的普通异常会包装为[Result.failure]，[CancellationException]会原样抛出。
+   *
+   * [onLoad]中不允许嵌套调用[load]、[tryLoad]或[cancelAndJoin]，否则会抛出异常。
+   * 嵌套检测依赖协程上下文，通过[runBlocking]或新线程绕开原上下文时无法检测，可能导致死锁。
    *
    * @param onLoad 加载回调
    */
   suspend fun <T> load(onLoad: suspend () -> T): Result<T>
 
   /**
-   * 功能和[load]类似
-   * 区别是：如果正在加载中，则抛出[BusyCancellationException]，它是[CancellationException]的子类，不捕获会静默取消调用协程
+   * 功能与[load]相同，但加载繁忙时立即抛出[BusyCancellationException]。
+   *
+   * [BusyCancellationException]是[CancellationException]的子类，不捕获会取消调用方协程。
+   * 在加载回调中调用其他 Loader 的[tryLoad]时，后者抛出的忙异常也会向外传播。
    */
   suspend fun <T> tryLoad(onLoad: suspend () -> T): Result<T>
 
@@ -44,10 +49,11 @@ interface FLoader {
     val isLoading: Boolean = false,
   )
 
-  /** [FLoader.tryLoad] */
-  class BusyCancellationException : CancellationException()
+  /** [tryLoad]在加载繁忙时抛出的取消异常 */
+  class BusyCancellationException : CancellationException("Loader is busy")
 }
 
+/** 创建一个[FLoader] */
 fun FLoader(): FLoader = LoaderImpl()
 
 /** 加载状态流 */

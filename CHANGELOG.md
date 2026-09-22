@@ -7,6 +7,14 @@
 - **修复 `tryLoad` 在旧任务取消期间不能立即判定为忙**：此前 `cancelAndJoin()` 或新的 `load` 在等待旧任务清理时，`tryLoad` 会挂起等待清理结束；若是 `cancelAndJoin()`，清理结束后 `tryLoad` 甚至会正常执行。现在这两种情况下 `tryLoad` 都会立即抛出 `FLoader.BusyCancellationException`。
 - **避免已取消调用方中断现有加载**：调用方在进入任务替换前检查取消状态，避免已取消的 `load` 调用取消正在运行的加载。
 
+### ✨ Improvements
+
+- **为忙异常增加明确消息**：`FLoader.BusyCancellationException` 的 message 现在是 `Loader is busy`，便于日志排查。
+
+### 📝 Documentation
+
+- **补充公开 API 和取消传播说明**：说明 `load` 被替换时的取消行为、跨 Loader 的忙异常传播，以及 `FMutex` 嵌套检测的限制。
+
 ## 1.7.1
 
 ### 📝 Documentation

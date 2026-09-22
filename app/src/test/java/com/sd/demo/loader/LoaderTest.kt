@@ -211,6 +211,7 @@ class LoaderTest {
 
     runCatching { loader.tryLoad { 1 } }.also { result ->
       assertEquals(true, result.exceptionOrNull() is FLoader.BusyCancellationException)
+      assertEquals("Loader is busy", result.exceptionOrNull()?.message)
     }
     assertEquals(true, loader.isLoading())
 
