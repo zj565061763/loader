@@ -48,13 +48,14 @@
 - `tryLoad` 在已有任务尚未完成时立即抛出 `FLoader.BusyCancellationException`，包括旧任务正在取消但尚未完成的阶段；它不能取消正在执行的任务
 - `BusyCancellationException` 是 `CancellationException` 的子类，调用方若不捕获，它会按协程取消语义传播；改变异常类型属于破坏性 API 变更
 - `cancelAndJoin` 会取消当前加载并等待其清理结束
+- 已取消的调用方不能取消正在运行的加载：`mutate` 在加锁前和加锁后都要检查 `ensureActive`，然后才能取消旧任务
 - `doLoad` 只把普通异常转换为 `Result.failure`；`CancellationException` 必须重新抛出，不能被包装或吞掉。公开的 `safeRunCatching` 也遵循相同规则
 - `onLoad` 返回后、创建 `Result.success` 前必须调用 `currentCoroutineContext().ensureActive()`，避免已取消的协程错误地报告成功
 - `isLoading` 在调用 `onLoad` 前设为 `true`，并在 `finally` 中恢复为 `false`。重新加载时，旧任务清理和新任务开始之间会依次发出 `false`、`true`
 
 ### `FMutator`
 
-- `_jobMutex` 仅保护当前 `Job` 的读取、替换和清理，临界区应保持短小；`_mutateMutex` 负责保护可能挂起的用户 block
+- `_jobMutex` 保护当前 `Job` 的读取和替换，以及取消并等待旧任务的过程；`_mutateMutex` 负责保护可能挂起的用户 block
 - 两把锁不可合并，否则取消并等待旧任务时可能形成死锁
 - `_job` 是 `AtomicReference`：锁内负责读取和替换，任务完成回调通过 `compareAndSet(mutateJob, null)` 无锁清理；修改这段逻辑时需同时验证完成、取消和任务替换的竞态
 - `tryLoad` 通过 `_jobMutex.tryLock()` 获取锁，失败即判定为忙，不能改为先检查再挂起加锁，否则检查与加锁之间仍可能挂起等待旧任务清理；因此完成回调不能持有 `_jobMutex`，锁只应在取消或替换任务时被持有
@@ -78,6 +79,6 @@
 
 - Kotlin 代码使用 2 空格缩进，注释和 KDoc 使用中文
 - 不要无意扩大公开 API；新增或修改公开 API 时提供简洁 KDoc
-- 每次行为变化都更新 `CHANGELOG.md`，使用现有的 `⚠️ Breaking Changes`、`✨ Improvements`、`🐛 Bug Fixes`、`🔧 Internal`、`📝 Documentation` 分类
+- 每次行为变化都更新 `CHANGELOG.md`，使用现有的 `⚠️ Breaking Changes`、`✨ Improvements`、`🐛 Bug Fixes`、`📝 Documentation` 分类；不对使用方产生影响的内部改动不写入 changelog
 - 破坏性变更在 changelog 中附带 `Migration` 代码示例
 - 发版时更新 `lib/gradle.properties` 中的 `VERSION_NAME`；版本发布提交标题使用版本号，例如 `1.7.1`
