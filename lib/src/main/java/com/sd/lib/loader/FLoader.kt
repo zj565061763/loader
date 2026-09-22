@@ -46,7 +46,8 @@ interface FLoader {
 
   /**
    * 取消加载，并等待取消完成。
-   * 调用方已取消时会提前抛出[CancellationException]；需要在外部`finally`中等待完成时，请使用`withContext(NonCancellable)`。
+   * 调用方已取消时不保证等待完成，可能抛出[CancellationException]；
+   * 需要在外部`finally`中等待完成时，请使用`withContext(NonCancellable)`。
    */
   suspend fun cancelAndJoin()
 
