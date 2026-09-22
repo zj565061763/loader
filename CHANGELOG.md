@@ -32,7 +32,6 @@
 ### ✨ Improvements
 
 - **新增 `FLoader.BusyCancellationException`**：可明确区分“因加载繁忙而取消”的场景，便于调用方按需捕获处理。
-- **内部重构**：将互斥、取消、嵌套检测逻辑从 `FLoader` 抽离为独立的组件（`FMutator`、`FMutex`），实现更清晰、更易维护。
 
 ### 🐛 Bug Fixes
 

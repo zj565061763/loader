@@ -420,6 +420,51 @@ class LoaderTest {
   }
 
   @Test
+  fun `test tryLoad when caller already cancelled`() = runTest {
+    val loader = FLoader()
+    var container = ""
+
+    val loadingJob = launch {
+      loader.load {
+        try {
+          delay(Long.MAX_VALUE)
+        } finally {
+          container += "1"
+        }
+      }
+    }.also {
+      runCurrent()
+    }
+
+    launch {
+      currentCoroutineContext().cancel()
+      loader.tryLoad { container += "2" }
+    }.also { cancelledJob ->
+      runCurrent()
+      assertEquals(true, cancelledJob.isCancelled)
+      assertEquals(true, cancelledJob.isCompleted)
+    }
+
+    assertEquals(true, loader.isLoading())
+    assertEquals(false, loadingJob.isCancelled)
+    assertEquals("", container)
+
+    loadingJob.cancelAndJoin()
+    assertEquals("1", container)
+
+    // 空闲时已取消的调用方也不会执行 onLoad
+    launch {
+      currentCoroutineContext().cancel()
+      loader.tryLoad { container += "2" }
+    }.also { cancelledJob ->
+      runCurrent()
+      assertEquals(true, cancelledJob.isCancelled)
+    }
+    assertEquals("1", container)
+    assertEquals(false, loader.isLoading())
+  }
+
+  @Test
   fun `test cancel when idle`() = runTest {
     val loader = FLoader()
     loader.cancelAndJoin()
