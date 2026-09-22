@@ -44,6 +44,7 @@ interface FLoader {
   /** 取消加载，并等待取消完成 */
   suspend fun cancelAndJoin()
 
+  /** 加载状态 */
   data class State(
     /** 是否正在加载中 */
     val isLoading: Boolean = false,

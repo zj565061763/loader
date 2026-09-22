@@ -38,6 +38,7 @@ internal class FMutator {
 
   suspend fun cancelAndJoin() {
     _mutateMutex.checkNested()
+    if (_job.get() == null && !_jobMutex.isLocked) return
     _jobMutex.withLock {
       _job.get()?.cancelAndJoin()
       _job.set(null)

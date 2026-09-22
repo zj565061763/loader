@@ -4,19 +4,27 @@ import app.cash.turbine.test
 import com.sd.lib.loader.FLoader
 import com.sd.lib.loader.loadingFlow
 import com.sd.lib.loader.safeRunCatching
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.cancelAndJoin
-import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.yield
 import kotlinx.coroutines.test.currentTime
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Test
+import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicInteger
 import kotlin.coroutines.cancellation.CancellationException
 
 @OptIn(ExperimentalCoroutinesApi::class)
@@ -282,6 +290,32 @@ class LoaderTest {
   }
 
   @Test
+  fun `test tryLoad busy from other loader propagates`() = runTest {
+    val loader = FLoader()
+    val otherLoader = FLoader()
+
+    val otherJob = launch {
+      otherLoader.load { delay(Long.MAX_VALUE) }
+    }.also {
+      runCurrent()
+    }
+
+    runCatching {
+      loader.load {
+        otherLoader.tryLoad { }
+      }
+    }.also { result ->
+      assertEquals(true, result.exceptionOrNull() is FLoader.BusyCancellationException)
+    }
+
+    assertEquals(false, loader.isLoading())
+    assertEquals(true, otherLoader.isLoading())
+    assertEquals(false, otherJob.isCancelled)
+
+    otherJob.cancelAndJoin()
+  }
+
+  @Test
   fun `test tryLoad when error in block`() = runTest {
     val loader = FLoader()
     loader.tryLoad {
@@ -462,6 +496,101 @@ class LoaderTest {
     }
     assertEquals("1", container)
     assertEquals(false, loader.isLoading())
+  }
+
+  @Test
+  fun `test concurrent load and tryLoad on multiple threads`() = runTest {
+    withContext(Dispatchers.Default) {
+      repeat(100) {
+        val loader = FLoader()
+        val start = CompletableDeferred<Unit>()
+        val running = AtomicInteger()
+        val started = AtomicInteger()
+        val overlapped = AtomicBoolean()
+        val onLoad: suspend () -> Unit = {
+          if (running.incrementAndGet() != 1) overlapped.set(true)
+          started.incrementAndGet()
+          try {
+            yield()
+          } finally {
+            running.decrementAndGet()
+          }
+        }
+
+        coroutineScope {
+          val loadJobs = List(8) {
+            async {
+              start.await()
+              try {
+                loader.load(onLoad).getOrThrow()
+              } catch (_: CancellationException) {
+                // 被后续任务取消属于预期行为
+              }
+            }
+          }
+          val tryLoadJobs = List(8) {
+            async {
+              start.await()
+              try {
+                loader.tryLoad(onLoad).getOrThrow()
+              } catch (_: CancellationException) {
+                // 忙状态或被后续任务取消属于预期行为
+              }
+            }
+          }
+          start.complete(Unit)
+          (loadJobs + tryLoadJobs).awaitAll()
+        }
+
+        loader.cancelAndJoin()
+        assertEquals(false, overlapped.get())
+        assertEquals(0, running.get())
+        assertEquals(true, started.get() > 0)
+        assertEquals(false, loader.isLoading())
+      }
+    }
+  }
+
+  @Test
+  fun `test concurrent cancelAndJoin on multiple threads`() = runTest {
+    withContext(Dispatchers.Default) {
+      repeat(50) {
+        val loader = FLoader()
+        val started = CompletableDeferred<Unit>()
+        val release = CompletableDeferred<Unit>()
+        val loadJob = async {
+          try {
+            loader.load {
+              started.complete(Unit)
+              try {
+                delay(Long.MAX_VALUE)
+              } finally {
+                withContext(NonCancellable) { release.await() }
+              }
+            }.getOrThrow()
+          } catch (_: CancellationException) {
+            // cancelAndJoin 取消加载属于预期行为
+          }
+        }
+
+        started.await()
+        coroutineScope {
+          val cancelStarted = AtomicInteger()
+          val cancelJobs = List(8) {
+            async {
+              cancelStarted.incrementAndGet()
+              loader.cancelAndJoin()
+            }
+          }
+          while (cancelStarted.get() < cancelJobs.size) yield()
+          release.complete(Unit)
+          cancelJobs.awaitAll()
+        }
+
+        loadJob.await()
+        assertEquals(false, loader.isLoading())
+      }
+    }
   }
 
   @Test

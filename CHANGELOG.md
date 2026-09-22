@@ -6,6 +6,7 @@
 
 - **修复 `tryLoad` 在旧任务取消期间不能立即判定为忙**：此前 `cancelAndJoin()` 或新的 `load` 在等待旧任务清理时，`tryLoad` 会挂起等待清理结束；若是 `cancelAndJoin()`，清理结束后 `tryLoad` 甚至会正常执行。现在这两种情况下 `tryLoad` 都会立即抛出 `FLoader.BusyCancellationException`。
 - **避免已取消调用方中断现有加载**：调用方在进入任务替换前检查取消状态，避免已取消的 `load` 调用取消正在运行的加载。
+- **避免空闲取消造成短暂忙状态**：空闲时调用 `cancelAndJoin()` 会直接返回，不再与并发的 `tryLoad` 竞争任务锁。
 
 ### ✨ Improvements
 
@@ -14,6 +15,7 @@
 ### 📝 Documentation
 
 - **补充公开 API 和取消传播说明**：说明 `load` 被替换时的取消行为、跨 Loader 的忙异常传播，以及 `FMutex` 嵌套检测的限制。
+- **补充协程依赖说明**：README 说明使用方需要自行添加兼容版本的 `kotlinx-coroutines`。
 
 ## 1.7.1
 
