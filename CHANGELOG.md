@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.7.2
+## 1.8.0
 
 ### 🐛 Bug Fixes
 
