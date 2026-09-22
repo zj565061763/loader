@@ -29,7 +29,7 @@ interface FLoader {
    * 被新调用取消的[load]会抛出[CancellationException]，不会返回[Result]。
    * [onLoad]抛出的普通异常会包装为[Result.failure]，[CancellationException]会原样抛出。
    *
-   * [onLoad]中不允许嵌套调用[load]、[tryLoad]或[cancelAndJoin]，否则会抛出异常。
+   * [onLoad]中不允许嵌套调用[load]、[tryLoad]或[cancelAndJoin]，未捕获的嵌套异常会包装为[Result.failure]。
    * 嵌套检测依赖协程上下文，通过[runBlocking]或新线程绕开原上下文时无法检测，可能导致死锁。
    *
    * @param onLoad 加载回调
@@ -44,7 +44,10 @@ interface FLoader {
    */
   suspend fun <T> tryLoad(onLoad: suspend () -> T): Result<T>
 
-  /** 取消加载，并等待取消完成 */
+  /**
+   * 取消加载，并等待取消完成。
+   * 调用方已取消时会提前抛出[CancellationException]；需要在外部`finally`中等待完成时，请使用`withContext(NonCancellable)`。
+   */
   suspend fun cancelAndJoin()
 
   /** 加载状态 */
@@ -60,7 +63,7 @@ interface FLoader {
 /** 创建一个[FLoader] */
 fun FLoader(): FLoader = LoaderImpl()
 
-/** 加载状态流 */
+/** 加载状态流，快速变化的中间值可能被合并 */
 val FLoader.loadingFlow: Flow<Boolean>
   get() = stateFlow.map { it.isLoading }.distinctUntilChanged()
 
