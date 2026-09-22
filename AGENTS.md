@@ -56,8 +56,8 @@
 
 - `_jobMutex` 仅保护当前 `Job` 的读取、替换和清理，临界区应保持短小；`_mutateMutex` 负责保护可能挂起的用户 block
 - 两把锁不可合并，否则取消并等待旧任务时可能形成死锁
-- `_job` 的所有读写都受 `_jobMutex` 保护，不需要 `@Volatile`
-- `invokeOnCompletion` 不能挂起，因此使用 `_jobMutex.tryLock()` 对 `_job` 做 best-effort 清理；修改这段逻辑时需同时验证完成、取消和任务替换的竞态
+- `_job` 是 `AtomicReference`：锁内负责读取和替换，任务完成回调通过 `compareAndSet(mutateJob, null)` 无锁清理；修改这段逻辑时需同时验证完成、取消和任务替换的竞态
+- `tryLoad` 通过 `_jobMutex.tryLock()` 获取锁，失败即判定为忙，不能改为先检查再挂起加锁，否则检查与加锁之间仍可能挂起等待旧任务清理；因此完成回调不能持有 `_jobMutex`，锁只应在取消或替换任务时被持有
 
 ### `FMutex` 与嵌套调用
 

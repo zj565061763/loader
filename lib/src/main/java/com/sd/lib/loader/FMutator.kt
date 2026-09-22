@@ -7,15 +7,17 @@ import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import java.util.concurrent.atomic.AtomicReference
 
 internal class FMutator {
-  private var _job: Job? = null
+  private val _job = AtomicReference<Job?>()
   private val _jobMutex = Mutex()
   private val _mutateMutex = FMutex()
 
   suspend fun <T> mutate(block: suspend () -> T): T {
     _mutateMutex.checkNested()
     return mutate(
+      lock = { _jobMutex.lock() },
       onStart = {},
       block = block,
     )
@@ -25,7 +27,9 @@ internal class FMutator {
   suspend fun <T> mutateOrThrow(block: suspend () -> T): T {
     _mutateMutex.checkNested()
     return mutate(
-      onStart = { if (_job?.isCompleted == false) throw BusyException() },
+      // 锁被持有说明正在取消或替换任务，立即判定为忙，避免挂起等待旧任务清理
+      lock = { if (!_jobMutex.tryLock()) throw BusyException() },
+      onStart = { if (_job.get()?.isCompleted == false) throw BusyException() },
       block = block,
     )
   }
@@ -33,28 +37,30 @@ internal class FMutator {
   suspend fun cancelAndJoin() {
     _mutateMutex.checkNested()
     _jobMutex.withLock {
-      _job?.cancelAndJoin()
-      _job = null
+      _job.get()?.cancelAndJoin()
+      _job.set(null)
     }
   }
 
   private suspend fun <T> mutate(
+    lock: suspend () -> Unit,
     onStart: () -> Unit,
     block: suspend () -> T,
   ): T {
     return coroutineScope {
       val mutateJob = coroutineContext[Job]!!
 
-      _jobMutex.withLock {
+      mutateJob.ensureActive()
+      lock()
+
+      try {
+        mutateJob.ensureActive()
         onStart()
-        _job?.cancelAndJoin()
-        _job = mutateJob
-        mutateJob.invokeOnCompletion {
-          if (_jobMutex.tryLock()) {
-            if (_job === mutateJob) _job = null
-            _jobMutex.unlock()
-          }
-        }
+        _job.get()?.cancelAndJoin()
+        _job.set(mutateJob)
+        mutateJob.invokeOnCompletion { _job.compareAndSet(mutateJob, null) }
+      } finally {
+        _jobMutex.unlock()
       }
 
       doMutate(block)

@@ -12,6 +12,7 @@ import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.test.currentTime
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
@@ -314,6 +315,106 @@ class LoaderTest {
     assertEquals(false, job.isCancelled)
 
     job.cancelAndJoin()
+    assertEquals("1", container)
+  }
+
+  @Test
+  fun `test tryLoad when cancelAndJoin waiting cleanup`() = runTest {
+    val loader = FLoader()
+    var container = ""
+
+    launch {
+      loader.load {
+        try {
+          delay(Long.MAX_VALUE)
+        } finally {
+          withContext(NonCancellable) { delay(1000) }
+          container += "1"
+        }
+      }
+    }.also {
+      runCurrent()
+    }
+
+    val cancelJob = launch { loader.cancelAndJoin() }.also { runCurrent() }
+
+    // 旧任务取消中，tryLoad 立即判定为忙，不等待清理
+    val startTime = currentTime
+    runCatching { loader.tryLoad { container += "2" } }.also { result ->
+      assertEquals(true, result.exceptionOrNull() is FLoader.BusyCancellationException)
+    }
+    assertEquals(startTime, currentTime)
+    assertEquals("", container)
+
+    cancelJob.join()
+    assertEquals("1", container)
+
+    loader.tryLoad { container += "2" }.getOrThrow()
+    assertEquals("12", container)
+  }
+
+  @Test
+  fun `test tryLoad when load waiting previous cleanup`() = runTest {
+    val loader = FLoader()
+    var container = ""
+
+    launch {
+      loader.load {
+        try {
+          delay(Long.MAX_VALUE)
+        } finally {
+          withContext(NonCancellable) { delay(1000) }
+          container += "1"
+        }
+      }
+    }.also {
+      runCurrent()
+    }
+
+    val loadJob = launch { loader.load { container += "2" } }.also { runCurrent() }
+
+    // 新任务正在等待旧任务清理，tryLoad 立即判定为忙
+    val startTime = currentTime
+    runCatching { loader.tryLoad { container += "3" } }.also { result ->
+      assertEquals(true, result.exceptionOrNull() is FLoader.BusyCancellationException)
+    }
+    assertEquals(startTime, currentTime)
+
+    loadJob.join()
+    assertEquals("12", container)
+  }
+
+  @Test
+  fun `test load when caller already cancelled`() = runTest {
+    val loader = FLoader()
+    var container = ""
+
+    val loadingJob = launch {
+      loader.load {
+        try {
+          delay(Long.MAX_VALUE)
+        } finally {
+          container += "1"
+        }
+      }
+    }.also {
+      runCurrent()
+    }
+
+    launch {
+      currentCoroutineContext().cancel()
+      loader.load { container += "2" }
+    }.also { cancelledJob ->
+      runCurrent()
+      assertEquals(true, cancelledJob.isCancelled)
+      assertEquals(true, cancelledJob.isCompleted)
+    }
+
+    assertEquals(true, loader.isLoading())
+    assertEquals(false, loadingJob.isCancelled)
+    assertEquals("", container)
+
+    loadingJob.cancelAndJoin()
     assertEquals("1", container)
   }
 

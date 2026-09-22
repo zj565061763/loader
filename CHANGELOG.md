@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+### 🐛 Bug Fixes
+
+- **修复 `tryLoad` 在旧任务取消期间不能立即判定为忙**：此前 `cancelAndJoin()` 或新的 `load` 在等待旧任务清理时，`tryLoad` 会挂起等待清理结束；若是 `cancelAndJoin()`，清理结束后 `tryLoad` 甚至会正常执行。现在这两种情况下 `tryLoad` 都会立即抛出 `FLoader.BusyCancellationException`。
+- **避免已取消调用方中断现有加载**：调用方在进入任务替换前检查取消状态，避免已取消的 `load` 调用取消正在运行的加载。
+
+### 🔧 Internal
+
+- **`FMutator._job` 改为 `AtomicReference`**：任务完成后通过 CAS 无锁清理 `_job`，不再占用锁，避免 `tryLoad` 误判为忙，也不会再遗留已完成任务的引用。
+
 ## 1.7.1
 
 ### 📝 Documentation
