@@ -542,7 +542,8 @@ class LoaderTest {
           (loadJobs + tryLoadJobs).awaitAll()
         }
 
-        loader.cancelAndJoin()
+        // 所有调用结束后应处于空闲，tryLoad 不能误判为忙
+        loader.tryLoad { }.getOrThrow()
         assertEquals(false, overlapped.get())
         assertEquals(0, running.get())
         assertEquals(true, started.get() > 0)
@@ -558,6 +559,7 @@ class LoaderTest {
         val loader = FLoader()
         val started = CompletableDeferred<Unit>()
         val release = CompletableDeferred<Unit>()
+        val cleaned = AtomicBoolean()
         val loadJob = async {
           try {
             loader.load {
@@ -565,7 +567,10 @@ class LoaderTest {
               try {
                 delay(Long.MAX_VALUE)
               } finally {
-                withContext(NonCancellable) { release.await() }
+                withContext(NonCancellable) {
+                  release.await()
+                  cleaned.set(true)
+                }
               }
             }.getOrThrow()
           } catch (_: CancellationException) {
@@ -580,6 +585,8 @@ class LoaderTest {
             async {
               cancelStarted.incrementAndGet()
               loader.cancelAndJoin()
+              // cancelAndJoin 必须等待清理结束才返回
+              assertEquals(true, cleaned.get())
             }
           }
           while (cancelStarted.get() < cancelJobs.size) yield()

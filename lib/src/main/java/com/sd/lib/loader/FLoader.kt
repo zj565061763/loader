@@ -17,7 +17,10 @@ interface FLoader {
   /** 状态流 */
   val stateFlow: StateFlow<State>
 
-  /** 是否正在加载中 */
+  /**
+   * 是否正在加载中，仅用于展示状态。
+   * 新旧任务切换时可能短暂为 false，不能用来判断[tryLoad]是否会成功。
+   */
   fun isLoading(): Boolean
 
   /**
