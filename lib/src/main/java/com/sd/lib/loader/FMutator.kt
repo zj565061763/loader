@@ -34,7 +34,7 @@ internal class FMutator {
   suspend fun <T> mutateOrThrow(block: suspend () -> T): T {
     _mutateMutex.checkNested()
     return mutate(
-      // 锁被持有说明正在取消或替换任务，立即判定为忙，避免挂起等待旧任务清理
+      // 锁被持有说明正在替换任务，立即判定为忙，避免挂起等待旧任务清理
       lock = { if (!_jobMutex.tryLock()) throw BusyException() },
       onStart = { if (_job.get()?.isCompleted == false) throw BusyException() },
       block = block,

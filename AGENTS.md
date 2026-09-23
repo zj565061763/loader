@@ -59,7 +59,7 @@
 
 - `_jobMutex` 保护当前 `Job` 的读取和替换，以及替换时取消并等待旧任务的过程；`_mutateMutex` 负责保护可能挂起的用户 block
 - 两把锁不可合并，否则取消并等待旧任务时可能形成死锁
-- `_job` 是 `AtomicReference`：锁内负责读取和替换，任务完成回调通过 `compareAndSet(mutateJob, null)` 无锁清理；修改这段逻辑时需同时验证完成、取消和任务替换的竞态
+- `_job` 是 `AtomicReference`：替换在锁内进行，`cancelAndJoin` 无锁读取，任务完成回调通过 `compareAndSet(mutateJob, null)` 无锁清理；修改这段逻辑时需同时验证完成、取消和任务替换的竞态
 - `_preparingJobs` 记录已进入但尚未设置为 `_job` 的任务：进入 `mutate` 时加入，设置为 `_job` 后或任务结束时移除
 - `cancelAndJoin` 不持有 `_jobMutex`：先收集 `_preparingJobs` 和 `_job`，全部取消后再一起等待
 - `cancelAndJoin` 不能循环重试直到没有任务，否则单线程调度器上可能忙等卡死，也会误取消之后发起的加载
