@@ -48,6 +48,8 @@
 - `tryLoad` 在已有任务尚未完成时立即抛出 `FLoader.BusyCancellationException`，包括旧任务正在取消但尚未完成的阶段；它不能取消正在执行的任务
 - `BusyCancellationException` 是 `CancellationException` 的子类，调用方若不捕获，它会按协程取消语义传播；改变异常类型属于破坏性 API 变更
 - `cancelAndJoin` 会取消当前加载并等待其清理结束
+- `cancelAndJoin` 只取消调用时已进入 `load`/`tryLoad` 的任务，包括正在等待旧任务清理的任务；之后发起的加载不受影响
+- 调用方已取消时，`cancelAndJoin` 仍必须发起取消，只是不保证等待完成，与 `Job.cancelAndJoin()` 一致
 - 已取消的调用方不能取消正在运行的加载：`mutate` 在加锁前和加锁后都要检查 `ensureActive`，然后才能取消旧任务
 - `doLoad` 只把普通异常转换为 `Result.failure`；`CancellationException` 必须重新抛出，不能被包装或吞掉。公开的 `safeRunCatching` 也遵循相同规则
 - `onLoad` 返回后、创建 `Result.success` 前必须调用 `currentCoroutineContext().ensureActive()`，避免已取消的协程错误地报告成功
@@ -55,10 +57,14 @@
 
 ### `FMutator`
 
-- `_jobMutex` 保护当前 `Job` 的读取和替换，以及取消并等待旧任务的过程；`_mutateMutex` 负责保护可能挂起的用户 block
+- `_jobMutex` 保护当前 `Job` 的读取和替换，以及替换时取消并等待旧任务的过程；`_mutateMutex` 负责保护可能挂起的用户 block
 - 两把锁不可合并，否则取消并等待旧任务时可能形成死锁
 - `_job` 是 `AtomicReference`：锁内负责读取和替换，任务完成回调通过 `compareAndSet(mutateJob, null)` 无锁清理；修改这段逻辑时需同时验证完成、取消和任务替换的竞态
-- `tryLoad` 通过 `_jobMutex.tryLock()` 获取锁，失败即判定为忙，不能改为先检查再挂起加锁，否则检查与加锁之间仍可能挂起等待旧任务清理；因此完成回调不能持有 `_jobMutex`，锁只应在取消或替换任务时被持有
+- `_preparingJobs` 记录已进入但尚未设置为 `_job` 的任务：进入 `mutate` 时加入，设置为 `_job` 后或任务结束时移除
+- `cancelAndJoin` 不持有 `_jobMutex`：先收集 `_preparingJobs` 和 `_job`，全部取消后再一起等待
+- `cancelAndJoin` 不能循环重试直到没有任务，否则单线程调度器上可能忙等卡死，也会误取消之后发起的加载
+- `cancelAndJoin` 先读 `_preparingJobs` 再读 `_job`，`mutate` 先设置 `_job` 再移出 `_preparingJobs`；两边顺序不可调换，否则可能漏掉正在替换任务的加载
+- `tryLoad` 通过 `_jobMutex.tryLock()` 获取锁，失败即判定为忙，不能改为先检查再挂起加锁，否则检查与加锁之间仍可能挂起等待旧任务清理；因此完成回调不能持有 `_jobMutex`，锁只应在替换任务时被持有
 
 ### `FMutex` 与嵌套调用
 

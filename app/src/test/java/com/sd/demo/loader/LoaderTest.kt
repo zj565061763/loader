@@ -18,6 +18,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.yield
+import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.currentTime
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
@@ -625,6 +626,147 @@ class LoaderTest {
           // 空闲取消不能占用任务锁并导致 tryLoad 误报忙
           assertEquals(false, tryLoadJob.await() is FLoader.BusyCancellationException)
         }
+      }
+    }
+  }
+
+  @Test
+  fun `test cancelAndJoin when caller already cancelled and load waiting previous cleanup`() = runTest {
+    val loader = FLoader()
+    var container = ""
+
+    launch {
+      loader.load {
+        try {
+          delay(Long.MAX_VALUE)
+        } finally {
+          withContext(NonCancellable) { delay(1000) }
+          container += "1"
+        }
+      }
+    }.also {
+      runCurrent()
+    }
+
+    // 新的 load 等待旧任务清理
+    val loadJob = async {
+      runCatching { loader.load { container += "2" } }.exceptionOrNull()
+    }.also {
+      runCurrent()
+    }
+
+    launch {
+      currentCoroutineContext().cancel()
+      loader.cancelAndJoin()
+    }.also { cancelledJob ->
+      runCurrent()
+      // 不等待旧任务清理
+      assertEquals(true, cancelledJob.isCompleted)
+    }
+
+    // 等待旧任务清理的 load 也会被取消，并立即返回
+    assertEquals(true, loadJob.await() is CancellationException)
+    assertEquals("", container)
+
+    advanceUntilIdle()
+    assertEquals("1", container)
+    assertEquals(false, loader.isLoading())
+
+    // 之后发起的加载不受影响
+    loader.load { container += "3" }.getOrThrow()
+    assertEquals("13", container)
+  }
+
+  // 回归时会在单线程上忙等，用超时让测试失败而不是卡住
+  @Test(timeout = 10_000)
+  fun `test load while cancelAndJoin waiting cleanup`() = runTest {
+    val loader = FLoader()
+    var container = ""
+
+    launch {
+      loader.load {
+        try {
+          delay(Long.MAX_VALUE)
+        } finally {
+          withContext(NonCancellable) { delay(1000) }
+          container += "1"
+        }
+      }
+    }.also {
+      runCurrent()
+    }
+
+    val cancelJob = launch {
+      loader.cancelAndJoin()
+      container += "2"
+    }.also {
+      runCurrent()
+    }
+
+    // cancelAndJoin 等待旧任务清理期间发起的 load 不受影响
+    loader.load { container += "3" }.getOrThrow()
+    cancelJob.join()
+    assertEquals("123", container)
+    assertEquals(false, loader.isLoading())
+  }
+
+  @Test
+  fun `test concurrent cancelAndJoin and load waiting previous cleanup on multiple threads`() = runTest {
+    withContext(Dispatchers.Default) {
+      repeat(100) { index ->
+        // 交替验证调用方正常和已取消两种情况
+        val callerCancelled = index % 2 == 0
+        val loader = FLoader()
+        val started = CompletableDeferred<Unit>()
+        val cleanupStarted = CompletableDeferred<Unit>()
+        val releaseCleanup = CompletableDeferred<Unit>()
+        val releaseLoad = CompletableDeferred<Unit>()
+        val cleaned = AtomicBoolean()
+        val loaded = AtomicBoolean()
+
+        val firstJob = launch {
+          runCatching {
+            loader.load {
+              started.complete(Unit)
+              try {
+                delay(Long.MAX_VALUE)
+              } finally {
+                withContext(NonCancellable) {
+                  cleanupStarted.complete(Unit)
+                  releaseCleanup.await()
+                  cleaned.set(true)
+                }
+              }
+            }
+          }
+        }
+        started.await()
+
+        val loadJob = async {
+          runCatching {
+            loader.load {
+              releaseLoad.await()
+              loaded.set(true)
+            }
+          }.exceptionOrNull()
+        }
+        // load 开始等待旧任务清理后，cancelAndJoin 与旧任务清理结束并发
+        cleanupStarted.await()
+        val cancelJob = launch {
+          if (callerCancelled) currentCoroutineContext().cancel()
+          loader.cancelAndJoin()
+          // 调用方正常时，返回前旧任务必须已清理结束
+          assertEquals(true, cleaned.get())
+        }
+        releaseCleanup.complete(Unit)
+
+        cancelJob.join()
+        releaseLoad.complete(Unit)
+        // 无论调用方是否已取消，等待旧任务清理的 load 都会被取消
+        assertEquals(true, loadJob.await() is CancellationException)
+        assertEquals(false, loaded.get())
+        firstJob.join()
+        assertEquals(false, loader.isLoading())
       }
     }
   }

@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+### 🐛 Bug Fixes
+
+- **修复已取消调用方的 `cancelAndJoin()` 可能不取消加载**：此前调用方已取消时（如在 `finally` 中调用），若恰逢新的 `load` 正在等待旧任务清理，`cancelAndJoin()` 会直接抛出 `CancellationException`，新加载照常运行。现在与 `Job.cancelAndJoin()` 一致，调用后一定发起取消，只是不保证等待完成。
+
+### ✨ Improvements
+
+- **`cancelAndJoin()` 一并取消等待旧任务清理的 `load`**：这类 `load` 会立即抛出 `CancellationException`，不再等旧任务清理结束。`cancelAndJoin()` 之后发起的加载不受影响。
+
 ## 1.8.0
 
 ### 🐛 Bug Fixes
