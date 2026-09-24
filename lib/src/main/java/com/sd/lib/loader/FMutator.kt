@@ -1,7 +1,7 @@
 package com.sd.lib.loader
 
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
@@ -11,7 +11,14 @@ import java.util.Collections
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicReference
 
-internal class FMutator {
+internal class FMutator(
+  /** 创建[cancelAndJoin]取消任务的异常 */
+  private val newCancelCause: () -> CancellationException? = { null },
+  /** 创建替换任务时取消旧任务的异常 */
+  private val newReplaceCause: () -> CancellationException? = { null },
+  /** 创建[mutateOrThrow]繁忙时抛出的异常 */
+  private val newBusyCause: () -> CancellationException = { CancellationException() },
+) {
   private val _job = AtomicReference<Job?>()
   private val _jobMutex = Mutex()
 
@@ -30,13 +37,12 @@ internal class FMutator {
     )
   }
 
-  @Throws(BusyException::class)
   suspend fun <T> mutateOrThrow(block: suspend () -> T): T {
     _mutateMutex.checkNested()
     return mutate(
       // 锁被持有说明正在替换任务，立即判定为忙，避免挂起等待旧任务清理
-      lock = { if (!_jobMutex.tryLock()) throw BusyException() },
-      onStart = { if (_job.get()?.isCompleted == false) throw BusyException() },
+      lock = { if (!_jobMutex.tryLock()) throw newBusyCause() },
+      onStart = { if (_job.get()?.isCompleted == false) throw newBusyCause() },
       block = block,
     )
   }
@@ -47,7 +53,7 @@ internal class FMutator {
     val jobs = _preparingJobs.toMutableList()
     _job.get()?.also { jobs.add(it) }
     // 先全部取消再等待，调用方已取消时也不会漏掉
-    jobs.forEach { it.cancel() }
+    jobs.forEach { it.cancel(newCancelCause()) }
     jobs.joinAll()
   }
 
@@ -71,7 +77,10 @@ internal class FMutator {
       try {
         mutateJob.ensureActive()
         onStart()
-        _job.get()?.cancelAndJoin()
+        _job.get()?.also { job ->
+          job.cancel(newReplaceCause())
+          job.join()
+        }
         _job.set(mutateJob)
         // 必须先设置 _job 再移除，与 cancelAndJoin 的读取顺序配对
         _preparingJobs.remove(mutateJob)
@@ -89,6 +98,4 @@ internal class FMutator {
       block()
     }
   }
-
-  class BusyException : Exception()
 }

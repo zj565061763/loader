@@ -9,6 +9,7 @@
 ### ✨ Improvements
 
 - **`cancelAndJoin()` 一并取消等待旧任务清理的 `load`**：这类 `load` 会立即抛出 `CancellationException`，不再等旧任务清理结束。`cancelAndJoin()` 之后发起的加载不受影响。
+- **新增 `FLoader.ReplacedCancellationException` 和 `FLoader.ManualCancellationException`**：加载被新的 `load` 取消时抛出前者，被 `cancelAndJoin()` 取消时抛出后者，便于区分取消来源。两者都是 `CancellationException` 的子类，原有捕获逻辑不受影响。
 
 ## 1.8.0
 

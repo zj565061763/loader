@@ -26,7 +26,11 @@ interface FLoader {
   /**
    * 开始加载，并取消和等待上一次加载结束。
    *
-   * 被新调用取消的[load]会抛出[CancellationException]，不会返回[Result]。
+   * 被新的[load]取消时抛出[ReplacedCancellationException]，
+   * 被[cancelAndJoin]取消时抛出[ManualCancellationException]，
+   * 被调用方取消时抛出普通的[CancellationException]，都不会返回[Result]。
+   *
+   * [onLoad]内收到的取消异常也是这些类型。
    * [onLoad]抛出的普通异常会包装为[Result.failure]，[CancellationException]会原样抛出。
    *
    * [onLoad]中不允许嵌套调用[load]、[tryLoad]或[cancelAndJoin]，未捕获的嵌套异常会包装为[Result.failure]。
@@ -57,8 +61,14 @@ interface FLoader {
     val isLoading: Boolean = false,
   )
 
+  /** 加载被[cancelAndJoin]取消时抛出的取消异常 */
+  class ManualCancellationException : CancellationException("Cancelled by cancelAndJoin")
+
   /** [tryLoad]在加载繁忙时抛出的取消异常 */
   class BusyCancellationException : CancellationException("Loader is busy")
+
+  /** 加载被新的[load]取消时抛出的取消异常 */
+  class ReplacedCancellationException : CancellationException("Cancelled by new load")
 }
 
 /** 创建一个[FLoader] */
@@ -77,7 +87,11 @@ inline fun <R> safeRunCatching(block: () -> R): Result<R> {
 //-------------------- impl --------------------
 
 private class LoaderImpl : FLoader {
-  private val _mutator = FMutator()
+  private val _mutator = FMutator(
+    newCancelCause = { FLoader.ManualCancellationException() },
+    newReplaceCause = { FLoader.ReplacedCancellationException() },
+    newBusyCause = { FLoader.BusyCancellationException() },
+  )
   private val _stateFlow = MutableStateFlow(FLoader.State())
   override val stateFlow: StateFlow<FLoader.State> = _stateFlow.asStateFlow()
 
@@ -92,12 +106,8 @@ private class LoaderImpl : FLoader {
   }
 
   override suspend fun <T> tryLoad(onLoad: suspend () -> T): Result<T> {
-    return try {
-      _mutator.mutateOrThrow {
-        doLoad(onLoad)
-      }
-    } catch (_: FMutator.BusyException) {
-      throw FLoader.BusyCancellationException()
+    return _mutator.mutateOrThrow {
+      doLoad(onLoad)
     }
   }
 

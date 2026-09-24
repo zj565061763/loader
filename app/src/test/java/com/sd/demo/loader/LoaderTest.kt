@@ -85,6 +85,58 @@ class LoaderTest {
   }
 
   @Test
+  fun `test load when cancelled by new load`() = runTest {
+    val loader = FLoader()
+    var exceptionInBlock: Throwable? = null
+
+    val job = async {
+      runCatching {
+        loader.load {
+          try {
+            delay(Long.MAX_VALUE)
+          } catch (e: CancellationException) {
+            exceptionInBlock = e
+            throw e
+          }
+        }
+      }.exceptionOrNull()
+    }.also {
+      runCurrent()
+    }
+
+    loader.load { }.getOrThrow()
+    // onLoad 和调用方都收到 ReplacedCancellationException
+    assertEquals(true, exceptionInBlock is FLoader.ReplacedCancellationException)
+    assertEquals(true, job.await() is FLoader.ReplacedCancellationException)
+  }
+
+  @Test
+  fun `test load when cancelled by cancelAndJoin`() = runTest {
+    val loader = FLoader()
+    var exceptionInBlock: Throwable? = null
+
+    val job = async {
+      runCatching {
+        loader.load {
+          try {
+            delay(Long.MAX_VALUE)
+          } catch (e: CancellationException) {
+            exceptionInBlock = e
+            throw e
+          }
+        }
+      }.exceptionOrNull()
+    }.also {
+      runCurrent()
+    }
+
+    loader.cancelAndJoin()
+    // onLoad 和调用方都收到 ManualCancellationException
+    assertEquals(true, exceptionInBlock is FLoader.ManualCancellationException)
+    assertEquals(true, job.await() is FLoader.ManualCancellationException)
+  }
+
+  @Test
   fun `test load when cancel`() = runTest {
     val loader = FLoader()
     var container = ""
@@ -158,7 +210,7 @@ class LoaderTest {
 
     loader.cancelAndJoin()
     // 取消后 onLoad 抛出的普通异常不能作为 Result 返回
-    assertEquals(true, job.await() is CancellationException)
+    assertEquals(true, job.await() is FLoader.ManualCancellationException)
     assertEquals(false, loader.isLoading())
   }
 
@@ -400,14 +452,16 @@ class LoaderTest {
     val loader = FLoader()
     var container = ""
 
-    val job = launch {
-      loader.tryLoad {
-        try {
-          delay(Long.MAX_VALUE)
-        } finally {
-          container += "1"
+    val job = async {
+      runCatching {
+        loader.tryLoad {
+          try {
+            delay(Long.MAX_VALUE)
+          } finally {
+            container += "1"
+          }
         }
-      }
+      }.exceptionOrNull()
     }.also {
       runCurrent()
     }
@@ -415,11 +469,11 @@ class LoaderTest {
     // tryLoad 发起的加载同样会被新的 load 取消
     loader.load {
       assertEquals("1", container)
-      assertEquals(true, job.isCancelled)
       2
     }.also { result ->
       assertEquals(2, result.getOrThrow())
     }
+    assertEquals(true, job.await() is FLoader.ReplacedCancellationException)
   }
 
   @Test
@@ -427,21 +481,23 @@ class LoaderTest {
     val loader = FLoader()
     var container = ""
 
-    val job = launch {
-      loader.tryLoad {
-        try {
-          delay(Long.MAX_VALUE)
-        } finally {
-          container += "1"
+    val job = async {
+      runCatching {
+        loader.tryLoad {
+          try {
+            delay(Long.MAX_VALUE)
+          } finally {
+            container += "1"
+          }
         }
-      }
+      }.exceptionOrNull()
     }.also {
       runCurrent()
     }
 
     loader.cancelAndJoin()
-    assertEquals(true, job.isCancelled)
     assertEquals("1", container)
+    assertEquals(true, job.await() is FLoader.ManualCancellationException)
     assertEquals(false, loader.isLoading())
   }
 
@@ -756,7 +812,7 @@ class LoaderTest {
     }
 
     // 等待旧任务清理的 load 也会被取消，并立即返回
-    assertEquals(true, loadJob.await() is CancellationException)
+    assertEquals(true, loadJob.await() is FLoader.ManualCancellationException)
     assertEquals("", container)
 
     advanceUntilIdle()
@@ -803,7 +859,7 @@ class LoaderTest {
     }
 
     // 调用方已取消时也要先取消全部任务，不能因等待失败而漏掉后面的任务
-    loadJobs.forEach { assertEquals(true, it.await() is CancellationException) }
+    loadJobs.forEach { assertEquals(true, it.await() is FLoader.ManualCancellationException) }
     advanceUntilIdle()
     assertEquals("1", container)
     assertEquals(false, loader.isLoading())
