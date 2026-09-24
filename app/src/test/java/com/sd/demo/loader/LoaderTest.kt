@@ -267,7 +267,7 @@ class LoaderTest {
         list.add("1")
       }
       list.add("2")
-    }
+    }.getOrThrow()
 
     assertEquals(listOf("1", "2"), list)
   }
@@ -389,6 +389,56 @@ class LoaderTest {
 
     job.cancelAndJoin()
     assertEquals("1", container)
+  }
+
+  @Test
+  fun `test load when tryLoad loading`() = runTest {
+    val loader = FLoader()
+    var container = ""
+
+    val job = launch {
+      loader.tryLoad {
+        try {
+          delay(Long.MAX_VALUE)
+        } finally {
+          container += "1"
+        }
+      }
+    }.also {
+      runCurrent()
+    }
+
+    // tryLoad 发起的加载同样会被新的 load 取消
+    loader.load {
+      assertEquals("1", container)
+      assertEquals(true, job.isCancelled)
+      2
+    }.also { result ->
+      assertEquals(2, result.getOrThrow())
+    }
+  }
+
+  @Test
+  fun `test cancelAndJoin when tryLoad loading`() = runTest {
+    val loader = FLoader()
+    var container = ""
+
+    val job = launch {
+      loader.tryLoad {
+        try {
+          delay(Long.MAX_VALUE)
+        } finally {
+          container += "1"
+        }
+      }
+    }.also {
+      runCurrent()
+    }
+
+    loader.cancelAndJoin()
+    assertEquals(true, job.isCancelled)
+    assertEquals("1", container)
+    assertEquals(false, loader.isLoading())
   }
 
   @Test
@@ -712,6 +762,47 @@ class LoaderTest {
     // 之后发起的加载不受影响
     loader.load { container += "3" }.getOrThrow()
     assertEquals("13", container)
+  }
+
+  @Test
+  fun `test cancelAndJoin when caller already cancelled and multiple loads waiting`() = runTest {
+    val loader = FLoader()
+    var container = ""
+
+    launch {
+      loader.load {
+        try {
+          delay(Long.MAX_VALUE)
+        } finally {
+          withContext(NonCancellable) { delay(1000) }
+          container += "1"
+        }
+      }
+    }.also {
+      runCurrent()
+    }
+
+    // 第一个 load 持有任务锁等待旧任务清理，第二个 load 等待任务锁
+    val loadJobs = List(2) { index ->
+      async {
+        runCatching { loader.load { container += "${index + 2}" } }.exceptionOrNull()
+      }
+    }.also {
+      runCurrent()
+    }
+
+    launch {
+      currentCoroutineContext().cancel()
+      loader.cancelAndJoin()
+    }.also {
+      runCurrent()
+    }
+
+    // 调用方已取消时也要先取消全部任务，不能因等待失败而漏掉后面的任务
+    loadJobs.forEach { assertEquals(true, it.await() is CancellationException) }
+    advanceUntilIdle()
+    assertEquals("1", container)
+    assertEquals(false, loader.isLoading())
   }
 
   // 回归时会在单线程上忙等，用超时让测试失败而不是卡住

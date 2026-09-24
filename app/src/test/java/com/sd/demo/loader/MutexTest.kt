@@ -50,7 +50,7 @@ class MutexTest {
         container.add("2-start")
         container.add("2-end")
       }
-    }
+    }.also { runCurrent() }
 
     // 第二个协程必须等第一个释放锁后才能进入
     assertEquals(listOf("1-start"), container)
