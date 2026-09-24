@@ -138,6 +138,29 @@ class LoaderTest {
   }
 
   @Test
+  fun `test load when error after cancel`() = runTest {
+    val loader = FLoader()
+    val job = async {
+      runCatching {
+        loader.load {
+          try {
+            delay(Long.MAX_VALUE)
+          } catch (_: CancellationException) {
+            error("error after cancel")
+          }
+        }
+      }.exceptionOrNull()
+    }.also {
+      runCurrent()
+    }
+
+    loader.cancelAndJoin()
+    // 取消后 onLoad 抛出的普通异常不能作为 Result 返回
+    assertEquals(true, job.await() is CancellationException)
+    assertEquals(false, loader.isLoading())
+  }
+
+  @Test
   fun `test cancelAndJoin in block`() = runTest {
     val loader = FLoader()
     loader.load {
@@ -259,7 +282,7 @@ class LoaderTest {
       }.also {
         assertEquals("Nested invoke", it.exceptionOrNull()!!.message)
       }
-    }
+    }.getOrThrow()
   }
 
   @Test
@@ -274,8 +297,22 @@ class LoaderTest {
         }.also {
           assertEquals("Nested invoke", it.exceptionOrNull()!!.message)
         }
+      }.getOrThrow()
+    }.getOrThrow()
+  }
+
+  @Test
+  fun `test nested load in child coroutine`() = runTest {
+    val loader = FLoader()
+    // 子协程继承上下文，嵌套调用同样会被检测
+    loader.load {
+      coroutineScope {
+        launch { loader.load { } }
       }
+    }.also { result ->
+      assertEquals("Nested invoke", result.exceptionOrNull()!!.message)
     }
+    assertEquals(false, loader.isLoading())
   }
 
   @Test
@@ -787,7 +824,7 @@ class LoaderTest {
     assertEquals(FLoader.State(isLoading = false), loader.stateFlow.value)
     loader.load {
       assertEquals(FLoader.State(isLoading = true), loader.stateFlow.value)
-    }
+    }.getOrThrow()
     assertEquals(FLoader.State(isLoading = false), loader.stateFlow.value)
   }
 
