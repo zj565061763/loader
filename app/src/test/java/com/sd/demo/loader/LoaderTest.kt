@@ -109,13 +109,15 @@ class LoaderTest {
   @Test
   fun `test load when throw CancellationException in block`() = runTest {
     val loader = FLoader()
+    var loadingInBlock = false
     launch {
       loader.load {
-        assertEquals(true, loader.isLoading())
+        loadingInBlock = loader.isLoading()
         throw CancellationException()
       }
     }.also { job ->
       runCurrent()
+      assertEquals(true, loadingInBlock)
       assertEquals(true, job.isCancelled)
       assertEquals(true, job.isCompleted)
       assertEquals(false, loader.isLoading())
@@ -382,7 +384,9 @@ class LoaderTest {
       runCurrent()
     }
 
-    runCatching { loader.tryLoad { } }
+    runCatching { loader.tryLoad { } }.also { result ->
+      assertEquals(true, result.exceptionOrNull() is FLoader.BusyCancellationException)
+    }
     assertEquals(true, loader.isLoading())
     assertEquals("", container)
     assertEquals(false, job.isCancelled)
@@ -782,7 +786,7 @@ class LoaderTest {
       runCurrent()
     }
 
-    // 第一个 load 持有任务锁等待旧任务清理，第二个 load 等待任务锁
+    // loadJobs 中第一个 load 持有任务锁等待旧任务清理，第二个等待任务锁
     val loadJobs = List(2) { index ->
       async {
         runCatching { loader.load { container += "${index + 2}" } }.exceptionOrNull()
