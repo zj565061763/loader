@@ -38,17 +38,17 @@
 - `FMutator.kt`：内部并发协调器，负责串行执行、取消旧任务以及忙状态判断，不属于公开 API
 - `FMutex.kt`：公开的互斥封装，在普通 `Mutex` 基础上增加同一实例的嵌套调用检测
 
-公开面应保持精简。修改 `FLoader`、`FLoader()`、`FLoader.State`、`FLoader.BusyCancellationException`、`FLoader.ReplacedCancellationException`、`FLoader.ManualCancellationException`、`loadingFlow`、`safeRunCatching` 或 `FMutex` 时，应按公开 API 兼容性审视改动。
+公开面应保持精简。修改 `FLoader`、`FLoader()`、`FLoader.State`、`FLoader.ManualCancellationException`、`FLoader.ReplacedCancellationException`、`FLoader.BusyCancellationException`、`loadingFlow`、`safeRunCatching` 或 `FMutex` 时，应按公开 API 兼容性审视改动。
 
 ## 并发语义与不可破坏的约束
 
 ### `FLoader`
 
 - `load` 会取消并等待上一次加载结束，然后串行执行新加载
-- 被新的 `load` 取消的旧加载（包括 `tryLoad` 发起的）抛出 `FLoader.ReplacedCancellationException`，被 `cancelAndJoin` 取消时抛出 `FLoader.ManualCancellationException`，被调用方取消时抛出普通的 `CancellationException`
+- 被 `cancelAndJoin` 取消的加载抛出 `FLoader.ManualCancellationException`，被新的 `load` 取消的旧加载（包括 `tryLoad` 发起的）抛出 `FLoader.ReplacedCancellationException`，被调用方取消时抛出普通的 `CancellationException`
 - 这些公开异常直接作为取消原因传给 `Job.cancel`，`onLoad` 内收到的也是同一类型；不能改为在 `load`/`tryLoad` 出口转换
 - `tryLoad` 在已有任务尚未完成时立即抛出 `FLoader.BusyCancellationException`，包括旧任务正在取消但尚未完成的阶段；它不能取消正在执行的任务
-- `BusyCancellationException`、`ReplacedCancellationException` 和 `ManualCancellationException` 都是 `CancellationException` 的子类，调用方若不捕获，它们会按协程取消语义传播；改变异常类型属于破坏性 API 变更
+- `ManualCancellationException`、`ReplacedCancellationException` 和 `BusyCancellationException` 都是 `CancellationException` 的子类，调用方若不捕获，它们会按协程取消语义传播；改变异常类型属于破坏性 API 变更
 - `cancelAndJoin` 会取消当前加载并等待其清理结束
 - `cancelAndJoin` 只取消调用时已进入 `load`/`tryLoad` 的任务，包括正在等待旧任务清理的任务；之后发起的加载不受影响
 - 调用方已取消时，`cancelAndJoin` 仍必须发起取消，只是不保证等待完成，与 `Job.cancelAndJoin()` 一致

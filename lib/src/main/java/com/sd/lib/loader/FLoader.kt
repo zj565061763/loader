@@ -26,8 +26,8 @@ interface FLoader {
   /**
    * 开始加载，并取消和等待上一次加载结束。
    *
-   * 被新的[load]取消时抛出[ReplacedCancellationException]，
    * 被[cancelAndJoin]取消时抛出[ManualCancellationException]，
+   * 被新的[load]取消时抛出[ReplacedCancellationException]，
    * 被调用方取消时抛出普通的[CancellationException]，都不会返回[Result]。
    *
    * [onLoad]内收到的取消异常也是这些类型。
@@ -64,11 +64,11 @@ interface FLoader {
   /** 加载被[cancelAndJoin]取消时抛出的取消异常 */
   class ManualCancellationException : CancellationException("Cancelled by cancelAndJoin")
 
-  /** [tryLoad]在加载繁忙时抛出的取消异常 */
-  class BusyCancellationException : CancellationException("Loader is busy")
-
   /** 加载被新的[load]取消时抛出的取消异常 */
   class ReplacedCancellationException : CancellationException("Cancelled by new load")
+
+  /** [tryLoad]在加载繁忙时抛出的取消异常 */
+  class BusyCancellationException : CancellationException("Loader is busy")
 }
 
 /** 创建一个[FLoader] */
