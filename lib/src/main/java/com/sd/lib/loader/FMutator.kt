@@ -74,10 +74,12 @@ internal class FMutator(
 
   suspend fun cancelAndJoin() {
     _mutateMutex.checkNested()
-    val jobs = synchronized(_lock) { listOfNotNull(_job, _runningJob).distinct() }
-    // 先全部取消再等待，调用方已取消时也不会漏掉
-    jobs.forEach { it.cancel(newCancelCause()) }
-    jobs.joinAll()
+    synchronized(_lock) {
+      listOfNotNull(_job, _runningJob).distinct()
+    }.also { jobs ->
+      jobs.forEach { it.cancel(newCancelCause()) }
+      jobs.joinAll()
+    }
   }
 
   private fun Job.clearOnCompletion() {
