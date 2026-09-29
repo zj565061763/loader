@@ -593,6 +593,44 @@ class LoaderTest {
   }
 
   @Test
+  fun `test load when previous load waiting cleanup`() = runTest {
+    val loader = FLoader()
+    var container = ""
+
+    launch {
+      loader.load {
+        try {
+          delay(Long.MAX_VALUE)
+        } finally {
+          withContext(NonCancellable) { delay(1000) }
+          container += "1"
+        }
+      }
+    }.also {
+      runCurrent()
+    }
+
+    val loadJob = async {
+      runCatching { loader.load { container += "2" } }.exceptionOrNull()
+    }.also {
+      runCurrent()
+    }
+
+    val startTime = currentTime
+    launch { loader.load { container += "3" } }.also { runCurrent() }
+
+    // 等待旧任务清理的 load 被新的 load 立即取消，不等清理结束
+    assertEquals(true, loadJob.isCompleted)
+    assertEquals(true, loadJob.await() is FLoader.ReplacedCancellationException)
+
+    advanceUntilIdle()
+    // 被取消的 load 不会执行，最新的 load 只等旧任务清理一次
+    assertEquals("13", container)
+    assertEquals(startTime + 1000, currentTime)
+    assertEquals(false, loader.isLoading())
+  }
+
+  @Test
   fun `test load when caller already cancelled`() = runTest {
     val loader = FLoader()
     var container = ""
@@ -867,7 +905,7 @@ class LoaderTest {
       runCurrent()
     }
 
-    // loadJobs 中第一个 load 持有任务锁等待旧任务清理，第二个等待任务锁
+    // 第二个 load 进入时取消第一个，并接替它等待旧任务清理
     val loadJobs = List(2) { index ->
       async {
         runCatching { loader.load { container += "${index + 2}" } }.exceptionOrNull()
@@ -883,8 +921,9 @@ class LoaderTest {
       runCurrent()
     }
 
-    // 调用方已取消时也要先取消全部任务，不能因等待失败而漏掉后面的任务
-    loadJobs.forEach { assertEquals(true, it.await() is FLoader.ManualCancellationException) }
+    // 第一个 load 被第二个替换，第二个 load 被 cancelAndJoin 取消
+    assertEquals(true, loadJobs[0].await() is FLoader.ReplacedCancellationException)
+    assertEquals(true, loadJobs[1].await() is FLoader.ManualCancellationException)
     advanceUntilIdle()
     assertEquals("1", container)
     assertEquals(false, loader.isLoading())
