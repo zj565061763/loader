@@ -14,7 +14,10 @@ import kotlin.coroutines.CoroutineContext
 class FMutex {
   private val _mutex = Mutex()
 
-  /** 在互斥锁内执行[action]，同一实例嵌套调用时抛出[IllegalStateException] */
+  /**
+   * 在互斥锁内执行[action]，同一实例嵌套调用时抛出[IllegalStateException]。
+   * 在`flow {}`中不能在[action]内调用`emit`，请改用`channelFlow`或在锁外`emit`。
+   */
   suspend fun <T> withLock(action: suspend () -> T): T {
     checkNested()
     return _mutex.withLock {

@@ -77,6 +77,7 @@
 - 每个 `FMutex` 实例拥有独立的 `CoroutineContext.Key`；不同实例可以嵌套，同一实例嵌套会抛出消息为 `Nested invoke` 的 `IllegalStateException`
 - key 必须按实例隔离，不能改为共享或静态 key，否则多个 loader 相互嵌套时会被误判
 - 嵌套检测依赖协程上下文。在 `withLock`/`onLoad` 内通过 `runBlocking`、新线程等方式绕开原上下文时无法检测，可能导致自锁；公开 KDoc 必须持续说明这一限制
+- 嵌套检测会在锁内的协程上下文中加入元素，`flow {}` 中在 `withLock`/`onLoad` 内 `emit` 会违反 Flow 的上下文约束；公开 KDoc 必须持续说明这一限制
 - `FLoader.load`、`tryLoad` 和 `cancelAndJoin` 都必须在进入任务簿记或锁等待前执行嵌套检查
 
 ## 测试约定
