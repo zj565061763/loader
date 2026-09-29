@@ -32,22 +32,23 @@ internal class FMutator(
     return coroutineScope {
       val mutateJob = coroutineContext[Job]!!
       mutateJob.clearOnCompletion()
-      // 已取消的调用方不能取消其他任务
       mutateJob.ensureActive()
 
       // 成为最新任务，并取消上一个任务
-      val (prevJob, runningJob) = synchronized(_lock) {
+      synchronized(_lock) {
         (_job to _runningJob).also { _job = mutateJob }
+      }.also { (prevJob, runningJob) ->
+        prevJob?.cancel(newReplaceCause())
+        runningJob?.join()
       }
-      prevJob?.cancel(newReplaceCause())
-      runningJob?.join()
 
       // 等待期间有更新的任务进入时放弃执行
-      val replaced = synchronized(_lock) {
+      synchronized(_lock) {
         (_job !== mutateJob).also { if (!it) _runningJob = mutateJob }
+      }.also { replaced ->
+        if (replaced) mutateJob.cancel(newReplaceCause())
+        mutateJob.ensureActive()
       }
-      if (replaced) mutateJob.cancel(newReplaceCause())
-      mutateJob.ensureActive()
 
       doMutate(block)
     }
