@@ -10,6 +10,8 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlin.coroutines.cancellation.CancellationException
 
 /** 协调加载任务，支持取消旧任务或在繁忙时拒绝新任务 */
@@ -33,6 +35,7 @@ interface FLoader {
    *
    * [onLoad]内收到的取消异常也是这些类型。
    * [onLoad]抛出的普通异常会包装为[Result.failure]，[CancellationException]会原样抛出。
+   * [withTimeout]超时的异常也会原样抛出，需要[Result.failure]时请改用[withTimeoutOrNull]或转换为普通异常。
    *
    * [onLoad]中不允许嵌套调用[load]、[tryLoad]或[cancelAndJoin]，未捕获的嵌套异常会包装为[Result.failure]。
    * 嵌套检测依赖协程上下文，通过[runBlocking]或新线程绕开原上下文时无法检测，可能导致死锁。
