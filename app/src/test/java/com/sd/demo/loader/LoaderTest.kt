@@ -382,6 +382,31 @@ class LoaderTest {
   }
 
   @Test
+  fun `test load other loader in block when cancelled by cancelAndJoin`() = runTest {
+    val loader = FLoader()
+    val otherLoader = FLoader()
+    var otherException: Throwable? = null
+
+    launch {
+      loader.load {
+        try {
+          otherLoader.load { delay(Long.MAX_VALUE) }
+        } catch (e: CancellationException) {
+          otherException = e
+          throw e
+        }
+      }
+    }.also {
+      runCurrent()
+    }
+
+    loader.cancelAndJoin()
+    // 取消原因会传给内层，内层抛出的是外层的 ManualCancellationException
+    assertEquals(true, otherException is FLoader.ManualCancellationException)
+    assertEquals(false, otherLoader.isLoading())
+  }
+
+  @Test
   fun `test tryLoad busy from other loader propagates`() = runTest {
     val loader = FLoader()
     val otherLoader = FLoader()

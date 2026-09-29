@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### 📝 Documentation
+
+- **修正调用方取消时的异常说明**：`load` 被调用方取消时抛出调用方的取消原因，不一定是普通的 `CancellationException`。在外层 Loader 的加载回调中调用 `load` 时，外层被取消，内层抛出的是外层的 `ManualCancellationException` 或 `ReplacedCancellationException`，不能据此判断是内层 Loader 发起的取消。
+
 ## 1.8.1
 
 ### 🐛 Bug Fixes
