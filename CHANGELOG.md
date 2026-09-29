@@ -10,7 +10,7 @@
 
 - **修正调用方取消时的异常说明**：`load` 被调用方取消时抛出调用方的取消原因，不一定是普通的 `CancellationException`。在外层 Loader 的加载回调中调用 `load` 时，外层被取消，内层抛出的是外层的 `ManualCancellationException` 或 `ReplacedCancellationException`，不能据此判断是内层 Loader 发起的取消。
 - **补充 `withTimeout` 超时说明**：`onLoad` 中 `withTimeout` 超时抛出的 `TimeoutCancellationException` 属于 `CancellationException`，`load` 会原样抛出，不返回 `Result.failure`。需要失败结果时改用 `withTimeoutOrNull`，或转换为普通异常。
-- **补充在 `flow {}` 中使用的限制**：`FMutex.withLock` 的锁内和 `load` / `tryLoad` 的 `onLoad` 内不能调用 `flow {}` 的 `emit`，`load` / `tryLoad` 会因此返回 `Result.failure`。请改用 `channelFlow`，或在锁外、`onLoad` 外 `emit`。
+- **补充在 `flow {}` 中使用的限制**：在 `flow {}` 中，`load` / `tryLoad` 的 `onLoad` 内不能调用 `emit`，否则返回 `Result.failure`。`FMutex.withLock` 的 `action` 内同样不能调用 `emit`。请改用 `channelFlow`，或在回调外 `emit`。
 
 ## 1.8.1
 
