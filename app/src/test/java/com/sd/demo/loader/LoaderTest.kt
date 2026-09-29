@@ -888,7 +888,7 @@ class LoaderTest {
   }
 
   @Test
-  fun `test cancelAndJoin when caller already cancelled and multiple loads waiting`() = runTest {
+  fun `test cancelAndJoin when caller already cancelled and multiple loads called`() = runTest {
     val loader = FLoader()
     var container = ""
 

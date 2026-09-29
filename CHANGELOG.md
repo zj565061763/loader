@@ -4,7 +4,7 @@
 
 ### 🐛 Bug Fixes
 
-- **修复连续调用 `load` 时排队中的旧加载仍会先执行**：此前一个 `load` 在等待旧任务清理时，即使又有更新的 `load` 进入，它仍会在旧任务结束后先执行 `onLoad` 再被取消，最新的加载还要多等它清理一次。现在更新的 `load` 进入时会立即取消它，它抛出 `FLoader.ReplacedCancellationException`，不会执行 `onLoad`。如果更新的 `load` 随后被其调用方取消，两者都不会执行。
+- **修复连续调用 `load` 时排队中的旧加载仍会先执行**：此前一个 `load` 在等待旧任务清理时，即使又有更新的 `load` 进入，它仍会在旧任务结束后开始执行 `onLoad`，之后才被取消，最新的加载还要多等它清理一次。现在更新的 `load` 进入时会立即取消它，它抛出 `FLoader.ReplacedCancellationException`，不会执行 `onLoad`。如果更新的 `load` 随后被其调用方取消，两者都不会执行。
 
 ### 📝 Documentation
 
