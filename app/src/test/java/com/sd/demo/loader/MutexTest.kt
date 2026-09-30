@@ -75,15 +75,13 @@ class MutexTest {
   @Test
   fun `test withLock nested same instance`() = runTest {
     val mutex = FMutex()
-    var message = "none"
-    mutex.withLock {
+    val exception = mutex.withLock {
       runCatching {
         mutex.withLock { }
-      }.also {
-        message = it.exceptionOrNull()!!.message!!
-      }
+      }.exceptionOrNull()
     }
-    assertEquals("Nested invoke", message)
+    assertEquals(true, exception is IllegalStateException)
+    assertEquals("Nested invoke", exception?.message)
   }
 
   @Test

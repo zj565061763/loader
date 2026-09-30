@@ -246,6 +246,7 @@ class LoaderTest {
       loader.cancelAndJoin()
     }.also { result ->
       // block 内嵌套调用 cancelAndJoin 会被拦截，避免自 join 死锁
+      assertEquals(true, result.exceptionOrNull() is IllegalStateException)
       assertEquals("Nested invoke", result.exceptionOrNull()!!.message)
     }
     assertEquals(false, loader.isLoading())
@@ -260,6 +261,7 @@ class LoaderTest {
         loader.cancelAndJoin()
       }
     }.also { result ->
+      assertEquals(true, result.exceptionOrNull() is IllegalStateException)
       assertEquals("Nested invoke", result.exceptionOrNull()!!.message)
     }
     assertEquals(false, loader.isLoading())
@@ -342,6 +344,7 @@ class LoaderTest {
       runCatching {
         loader.load { }
       }.also {
+        assertEquals(true, it.exceptionOrNull() is IllegalStateException)
         assertEquals("Nested invoke", it.exceptionOrNull()!!.message)
         list.add("1")
       }
@@ -359,6 +362,7 @@ class LoaderTest {
       runCatching {
         loader.tryLoad { }
       }.also {
+        assertEquals(true, it.exceptionOrNull() is IllegalStateException)
         assertEquals("Nested invoke", it.exceptionOrNull()!!.message)
       }
     }.getOrThrow()
@@ -374,6 +378,7 @@ class LoaderTest {
         runCatching {
           loader.load { }
         }.also {
+          assertEquals(true, it.exceptionOrNull() is IllegalStateException)
           assertEquals("Nested invoke", it.exceptionOrNull()!!.message)
         }
       }.getOrThrow()
@@ -389,6 +394,7 @@ class LoaderTest {
         launch { loader.load { } }
       }
     }.also { result ->
+      assertEquals(true, result.exceptionOrNull() is IllegalStateException)
       assertEquals("Nested invoke", result.exceptionOrNull()!!.message)
     }
     assertEquals(false, loader.isLoading())
@@ -900,24 +906,28 @@ class LoaderTest {
           }
         }
 
-        started.await()
-        coroutineScope {
-          val cancelStarted = AtomicInteger()
-          val cancelJobs = List(8) {
-            async {
-              cancelStarted.incrementAndGet()
-              loader.cancelAndJoin()
-              // cancelAndJoin 必须等待清理结束才返回
-              assertEquals(true, cleaned.get())
+        try {
+          started.await()
+          coroutineScope {
+            val cancelStarted = AtomicInteger()
+            val cancelJobs = List(8) {
+              async {
+                cancelStarted.incrementAndGet()
+                loader.cancelAndJoin()
+                // cancelAndJoin 必须等待清理结束才返回
+                assertEquals(true, cleaned.get())
+              }
             }
+            while (cancelStarted.get() < cancelJobs.size) yield()
+            release.complete(Unit)
+            cancelJobs.awaitAll()
           }
-          while (cancelStarted.get() < cancelJobs.size) yield()
-          release.complete(Unit)
-          cancelJobs.awaitAll()
-        }
 
-        loadJob.await()
-        assertEquals(false, loader.isLoading())
+          loadJob.await()
+          assertEquals(false, loader.isLoading())
+        } finally {
+          release.complete(Unit)
+        }
       }
     }
   }
@@ -1104,33 +1114,38 @@ class LoaderTest {
             }
           }
         }
-        started.await()
+        try {
+          started.await()
 
-        val loadJob = async {
-          runCatching {
-            loader.load {
-              releaseLoad.await()
-              loaded.set(true)
-            }
-          }.exceptionOrNull()
-        }
-        // load 开始等待旧任务清理后，cancelAndJoin 与旧任务清理结束并发
-        cleanupStarted.await()
-        val cancelJob = launch {
-          if (callerCancelled) currentCoroutineContext().cancel()
-          loader.cancelAndJoin()
-          // 调用方正常时，返回前旧任务必须已清理结束
-          assertEquals(true, cleaned.get())
-        }
-        releaseCleanup.complete(Unit)
+          val loadJob = async {
+            runCatching {
+              loader.load {
+                releaseLoad.await()
+                loaded.set(true)
+              }
+            }.exceptionOrNull()
+          }
+          // load 开始等待旧任务清理后，cancelAndJoin 与旧任务清理结束并发
+          cleanupStarted.await()
+          val cancelJob = launch {
+            if (callerCancelled) currentCoroutineContext().cancel()
+            loader.cancelAndJoin()
+            // 调用方正常时，返回前旧任务必须已清理结束
+            assertEquals(true, cleaned.get())
+          }
+          releaseCleanup.complete(Unit)
 
-        cancelJob.join()
-        releaseLoad.complete(Unit)
-        // 无论调用方是否已取消，等待旧任务清理的 load 都会被取消
-        assertEquals(true, loadJob.await() is CancellationException)
-        assertEquals(false, loaded.get())
-        firstJob.join()
-        assertEquals(false, loader.isLoading())
+          cancelJob.join()
+          releaseLoad.complete(Unit)
+          // 无论调用方是否已取消，等待旧任务清理的 load 都会被取消
+          assertEquals(true, loadJob.await() is CancellationException)
+          assertEquals(false, loaded.get())
+          firstJob.join()
+          assertEquals(false, loader.isLoading())
+        } finally {
+          releaseCleanup.complete(Unit)
+          releaseLoad.complete(Unit)
+        }
       }
     }
   }
