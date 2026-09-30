@@ -1,5 +1,6 @@
 package com.sd.lib.loader
 
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.Flow
@@ -126,7 +127,8 @@ private class LoaderImpl : FLoader {
   private suspend fun <T> doLoad(onLoad: suspend () -> T): Result<T> {
     return try {
       _stateFlow.update { it.copy(isLoading = true) }
-      onLoad().let { data ->
+      // 等待 onLoad 用当前上下文启动的子协程结束，让其异常也包装为 Result.failure
+      coroutineScope { onLoad() }.let { data ->
         currentCoroutineContext().ensureActive()
         Result.success(data)
       }

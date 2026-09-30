@@ -5,6 +5,7 @@ import com.sd.lib.loader.FLoader
 import com.sd.lib.loader.loadingFlow
 import com.sd.lib.loader.safeRunCatching
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.NonCancellable
@@ -52,6 +53,30 @@ class LoaderTest {
     }.also { result ->
       assertEquals("error in block", result.exceptionOrNull()!!.message)
     }
+    assertEquals(false, loader.isLoading())
+  }
+
+  @Test
+  fun `test load when error in child coroutine`() = runTest {
+    val loader = FLoader()
+    val job = async {
+      loader.load {
+        CoroutineScope(currentCoroutineContext()).launch {
+          delay(100)
+          error("error in child")
+        }
+        1
+      }
+    }.also {
+      runCurrent()
+    }
+
+    // onLoad 已返回，但子协程未结束，仍处于加载中
+    assertEquals(true, loader.isLoading())
+    assertEquals(false, job.isCompleted)
+
+    // 子协程的普通异常包装为 Result.failure，不会直接抛出
+    assertEquals("error in child", job.await().exceptionOrNull()!!.message)
     assertEquals(false, loader.isLoading())
   }
 
