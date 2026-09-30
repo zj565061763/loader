@@ -618,6 +618,92 @@ class LoaderTest {
   }
 
   @Test
+  fun `test tryLoad when queued caller cancelled during previous cleanup`() = runTest {
+    val loader = FLoader()
+    var container = ""
+    var cleanupStarted = false
+
+    val loadingJob = launch {
+      loader.load {
+        try {
+          delay(Long.MAX_VALUE)
+        } finally {
+          withContext(NonCancellable) {
+            cleanupStarted = true
+            delay(1000)
+          }
+          container += "1"
+        }
+      }
+    }.also { runCurrent() }
+
+    val queuedJob = launch { loader.load { container += "2" } }.also { runCurrent() }
+    queuedJob.cancelAndJoin()
+    // 排队任务已取消并完成，旧任务仍在清理
+    assertEquals(true, queuedJob.isCompleted)
+    assertEquals(true, cleanupStarted)
+    assertEquals(false, loadingJob.isCompleted)
+    assertEquals("", container)
+    val startTime = currentTime
+
+    runCatching { loader.tryLoad { container += "3" }.getOrThrow() }.also { result ->
+      assertEquals(true, result.exceptionOrNull() is FLoader.BusyCancellationException)
+    }
+    assertEquals(startTime, currentTime)
+    assertEquals("", container)
+
+    advanceUntilIdle()
+    assertEquals("1", container)
+    assertEquals(false, loader.isLoading())
+    loader.tryLoad { container += "3" }.getOrThrow()
+    assertEquals("13", container)
+  }
+
+  @Test
+  fun `test cancelAndJoin when queued caller cancelled during previous cleanup`() = runTest {
+    val loader = FLoader()
+    var container = ""
+    var cleanupStarted = false
+
+    val loadingJob = launch {
+      loader.load {
+        try {
+          delay(Long.MAX_VALUE)
+        } finally {
+          withContext(NonCancellable) {
+            cleanupStarted = true
+            delay(1000)
+          }
+          container += "1"
+        }
+      }
+    }.also { runCurrent() }
+
+    val queuedJob = launch { loader.load { container += "2" } }.also { runCurrent() }
+    queuedJob.cancelAndJoin()
+    assertEquals(true, queuedJob.isCompleted)
+    assertEquals(true, cleanupStarted)
+    assertEquals(false, loadingJob.isCompleted)
+    assertEquals("", container)
+    val startTime = currentTime
+
+    // 排队任务结束后，cancelAndJoin 仍须等待旧任务清理
+    val cancelJob = launch {
+      loader.cancelAndJoin()
+      container += "3"
+    }.also { runCurrent() }
+    assertEquals(false, cancelJob.isCompleted)
+    assertEquals(startTime, currentTime)
+    assertEquals("", container)
+
+    cancelJob.join()
+    assertEquals(true, loadingJob.isCompleted)
+    assertEquals(startTime + 1000, currentTime)
+    assertEquals("13", container)
+    assertEquals(false, loader.isLoading())
+  }
+
+  @Test
   fun `test load when previous load waiting cleanup`() = runTest {
     val loader = FLoader()
     var container = ""
@@ -858,8 +944,9 @@ class LoaderTest {
           start.complete(Unit)
           cancelJobs.awaitAll()
 
-          // 空闲取消不能占用任务锁并导致 tryLoad 误报忙
-          assertEquals(false, tryLoadJob.await() is FLoader.BusyCancellationException)
+          // tryLoad 只能成功或被并发的 cancelAndJoin 手动取消
+          val exception = tryLoadJob.await()
+          if (exception != null && exception !is FLoader.ManualCancellationException) throw exception
         }
       }
     }
