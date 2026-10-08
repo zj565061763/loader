@@ -18,6 +18,8 @@ import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.test.StandardTestDispatcher
+import kotlinx.coroutines.test.TestCoroutineScheduler
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.currentTime
 import kotlinx.coroutines.test.runCurrent
@@ -41,7 +43,7 @@ class LoaderTest {
   private class BusinessException(val code: Int) : RuntimeException("business error: $code")
 
   // 自定义取消原因，用于验证原始异常实例
-  private class CustomCancellationException : CancellationException("custom cause")
+  private class CustomCancellationException(val code: Int = 1) : CancellationException("custom cause")
 
   @Test
   fun `test load when success`() = runTest {
@@ -893,7 +895,9 @@ class LoaderTest {
   @Test
   fun `test load when caller already cancelled`() = runTest {
     val loader = FLoader()
+    val cause = CustomCancellationException()
     var container = ""
+    var thrown: Throwable? = null
 
     val loadingJob = launch {
       loader.load {
@@ -908,10 +912,11 @@ class LoaderTest {
     }
 
     launch {
-      currentCoroutineContext().cancel()
-      loader.load { container += "2" }
+      currentCoroutineContext().cancel(cause)
+      thrown = runCatching { loader.load { container += "2" } }.exceptionOrNull()
     }.also { cancelledJob ->
       runCurrent()
+      assertSame(cause, thrown)
       assertEquals(true, cancelledJob.isCancelled)
       assertEquals(true, cancelledJob.isCompleted)
     }
@@ -922,12 +927,28 @@ class LoaderTest {
 
     loadingJob.cancelAndJoin()
     assertEquals("1", container)
+
+    val idleCause = CustomCancellationException(2)
+    launch {
+      currentCoroutineContext().cancel(idleCause)
+      thrown = runCatching { loader.load { container += "2" } }.exceptionOrNull()
+    }.also { cancelledJob ->
+      runCurrent()
+      assertSame(idleCause, thrown)
+      assertEquals(true, cancelledJob.isCancelled)
+      assertEquals(true, cancelledJob.isCompleted)
+    }
+    assertEquals("1", container)
+    assertEquals(false, loader.isLoading())
+    assertEquals(3, loader.tryLoad { 3 }.getOrThrow())
   }
 
   @Test
   fun `test tryLoad when caller already cancelled`() = runTest {
     val loader = FLoader()
+    val cause = CustomCancellationException()
     var container = ""
+    var thrown: Throwable? = null
 
     val loadingJob = launch {
       loader.load {
@@ -942,10 +963,11 @@ class LoaderTest {
     }
 
     launch {
-      currentCoroutineContext().cancel()
-      loader.tryLoad { container += "2" }
+      currentCoroutineContext().cancel(cause)
+      thrown = runCatching { loader.tryLoad { container += "2" } }.exceptionOrNull()
     }.also { cancelledJob ->
       runCurrent()
+      assertSame(cause, thrown)
       assertEquals(true, cancelledJob.isCancelled)
       assertEquals(true, cancelledJob.isCompleted)
     }
@@ -958,15 +980,19 @@ class LoaderTest {
     assertEquals("1", container)
 
     // 空闲时已取消的调用方也不会执行 onLoad
+    val idleCause = CustomCancellationException(2)
     launch {
-      currentCoroutineContext().cancel()
-      loader.tryLoad { container += "2" }
+      currentCoroutineContext().cancel(idleCause)
+      thrown = runCatching { loader.tryLoad { container += "2" } }.exceptionOrNull()
     }.also { cancelledJob ->
       runCurrent()
+      assertSame(idleCause, thrown)
       assertEquals(true, cancelledJob.isCancelled)
+      assertEquals(true, cancelledJob.isCompleted)
     }
     assertEquals("1", container)
     assertEquals(false, loader.isLoading())
+    assertEquals(3, loader.tryLoad { 3 }.getOrThrow())
   }
 
   @Test
@@ -1391,6 +1417,74 @@ class LoaderTest {
     cancelJob.join()
     assertEquals("123", container)
     assertEquals(false, loader.isLoading())
+  }
+
+  @Test(timeout = 10_000)
+  fun `test cancelAndJoin returns while later load remains running`() = runTest {
+    val loader = FLoader()
+    val cancelScheduler = TestCoroutineScheduler()
+    val cancelDispatcher = StandardTestDispatcher(cancelScheduler)
+    val releaseCleanup = CompletableDeferred<Unit>()
+    val releaseLoad = CompletableDeferred<Unit>()
+    val container = mutableListOf<String>()
+    val firstJob = async {
+      runCatching {
+        loader.load {
+          try {
+            delay(Long.MAX_VALUE)
+          } finally {
+            withContext(NonCancellable) { releaseCleanup.await() }
+            container.add("old-cleaned")
+          }
+        }
+      }.exceptionOrNull()
+    }.also { runCurrent() }
+
+    // 使用独立调度器，让取消方在新加载开始后恢复
+    val cancelJob = launch(cancelDispatcher + cancelScheduler) {
+      loader.cancelAndJoin()
+      container.add("cancel-finished")
+    }
+    try {
+      cancelScheduler.runCurrent()
+      runCurrent()
+      assertEquals(false, cancelJob.isCompleted)
+      assertEquals(false, firstJob.isCompleted)
+
+      val nextJob = async {
+        loader.load {
+          container.add("new-load")
+          releaseLoad.await()
+          2
+        }.getOrThrow()
+      }.also { runCurrent() }
+      assertEquals(emptyList<String>(), container)
+
+      releaseCleanup.complete(Unit)
+      runCurrent()
+      assertTrue(firstJob.await() is FLoader.ManualCancellationException)
+      assertEquals(listOf("old-cleaned", "new-load"), container)
+      assertEquals(false, cancelJob.isCompleted)
+      assertEquals(true, loader.isLoading())
+
+      // 新加载仍在执行，cancelAndJoin 只需等待调用时的任务
+      cancelScheduler.runCurrent()
+      assertEquals(true, cancelJob.isCompleted)
+      assertEquals(listOf("old-cleaned", "new-load", "cancel-finished"), container)
+      assertEquals(false, nextJob.isCompleted)
+      assertEquals(false, nextJob.isCancelled)
+      assertEquals(true, loader.isLoading())
+
+      releaseLoad.complete(Unit)
+      assertEquals(2, nextJob.await())
+      assertEquals(false, loader.isLoading())
+      assertEquals(3, loader.tryLoad { 3 }.getOrThrow())
+    } finally {
+      releaseCleanup.complete(Unit)
+      releaseLoad.complete(Unit)
+      runCurrent()
+      cancelScheduler.runCurrent()
+    }
   }
 
   @Test
