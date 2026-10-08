@@ -2,17 +2,33 @@ package com.sd.demo.loader
 
 import com.sd.lib.loader.FMutex
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.asCoroutineDispatcher
+import kotlinx.coroutines.async
+import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.joinAll
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.yield
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertSame
 import org.junit.Test
+import java.util.concurrent.Executors
+import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicInteger
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class MutexTest {
+
+  private class BusinessException(val code: Int) : RuntimeException("business error: $code")
 
   @Test
   fun `test withLock`() = runTest {
@@ -127,5 +143,145 @@ class MutexTest {
       mutexB.withLock { 42 }
     }
     assertEquals(42, result)
+  }
+
+  @Test(timeout = 10_000)
+  fun `test withLock mutually exclusive on multiple threads`() = runTest {
+    withContext(Dispatchers.Default) {
+      val mutex = FMutex()
+      val start = CompletableDeferred<Unit>()
+      val running = AtomicInteger()
+      val overlapped = AtomicBoolean()
+      var completed = 0
+
+      coroutineScope {
+        List(8) {
+          launch {
+            start.await()
+            repeat(100) {
+              mutex.withLock {
+                if (running.incrementAndGet() != 1) overlapped.set(true)
+                try {
+                  val previous = completed
+                  yield()
+                  completed = previous + 1
+                } finally {
+                  running.decrementAndGet()
+                }
+              }
+            }
+          }
+        }.also { jobs ->
+          start.complete(Unit)
+          jobs.joinAll()
+        }
+      }
+
+      assertEquals(false, overlapped.get())
+      assertEquals(0, running.get())
+      assertEquals(800, completed)
+      assertEquals(1, mutex.withLock { 1 })
+    }
+  }
+
+  @Test(timeout = 10_000)
+  fun `test withLock releases after error on multiple threads`() = runTest {
+    withContext(Dispatchers.Default) {
+      val mutex = FMutex()
+      val cause = BusinessException(1)
+      val started = CompletableDeferred<Unit>()
+      val release = CompletableDeferred<Unit>()
+      val holderJob = async {
+        runCatching {
+          mutex.withLock {
+            started.complete(Unit)
+            release.await()
+            throw cause
+          }
+        }.exceptionOrNull()
+      }
+
+      try {
+        started.await()
+        val waiterJob = async(start = CoroutineStart.UNDISPATCHED) {
+          mutex.withLock { 2 }
+        }
+        assertEquals(false, waiterJob.isCompleted)
+        release.complete(Unit)
+
+        assertSame(cause, holderJob.await())
+        assertEquals(2, waiterJob.await())
+        assertEquals(3, mutex.withLock { 3 })
+      } finally {
+        release.complete(Unit)
+      }
+    }
+  }
+
+  @Test(timeout = 10_000)
+  fun `test withLock releases after cancellation on multiple threads`() = runTest {
+    withContext(Dispatchers.Default) {
+      repeat(50) {
+        val mutex = FMutex()
+        val started = CompletableDeferred<Unit>()
+        val cancelledWaiterEntered = AtomicBoolean()
+        val holderJob = launch {
+          mutex.withLock {
+            started.complete(Unit)
+            delay(Long.MAX_VALUE)
+          }
+        }
+
+        try {
+          started.await()
+          val cancelledWaiterJob = launch(start = CoroutineStart.UNDISPATCHED) {
+            mutex.withLock { cancelledWaiterEntered.set(true) }
+          }
+          assertEquals(false, cancelledWaiterJob.isCompleted)
+          cancelledWaiterJob.cancelAndJoin()
+          assertEquals(false, cancelledWaiterEntered.get())
+          assertEquals(false, holderJob.isCompleted)
+
+          val waiterJob = async(start = CoroutineStart.UNDISPATCHED) {
+            mutex.withLock { 2 }
+          }
+          assertEquals(false, waiterJob.isCompleted)
+          holderJob.cancelAndJoin()
+
+          assertEquals(2, waiterJob.await())
+          assertEquals(3, mutex.withLock { 3 })
+        } finally {
+          holderJob.cancelAndJoin()
+        }
+      }
+    }
+  }
+
+  @Test(timeout = 10_000)
+  fun `test withLock nested across dispatchers`() = runTest {
+    Executors.newSingleThreadExecutor().asCoroutineDispatcher().use { firstDispatcher ->
+      Executors.newSingleThreadExecutor().asCoroutineDispatcher().use { secondDispatcher ->
+        val mutex = FMutex()
+        val otherMutex = FMutex()
+
+        withContext(firstDispatcher) {
+          mutex.withLock {
+            withContext(secondDispatcher) {
+              runCatching {
+                // 回归时限时退出，释放外层锁并关闭专用线程
+                withTimeout(5_000) { mutex.withLock { } }
+              }.also { result ->
+                assertEquals(true, result.exceptionOrNull() is IllegalStateException)
+                assertEquals("Nested invoke", result.exceptionOrNull()!!.message)
+              }
+              assertEquals(1, otherMutex.withLock { 1 })
+            }
+          }
+        }
+
+        assertEquals(2, mutex.withLock { 2 })
+        assertEquals(3, otherMutex.withLock { 3 })
+      }
+    }
   }
 }

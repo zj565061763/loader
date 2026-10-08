@@ -37,6 +37,9 @@ import kotlin.coroutines.cancellation.CancellationException
 @OptIn(ExperimentalCoroutinesApi::class)
 class LoaderTest {
 
+  // 带业务字段的异常，用于验证类型和数据原样保留
+  private class BusinessException(val code: Int) : RuntimeException("business error: $code")
+
   // 自定义取消原因，用于验证原始异常实例
   private class CustomCancellationException : CancellationException("custom cause")
 
@@ -55,11 +58,12 @@ class LoaderTest {
   @Test
   fun `test load when error in block`() = runTest {
     val loader = FLoader()
+    val cause = BusinessException(1)
     loader.load {
       assertEquals(true, loader.isLoading())
-      error("error in block")
+      throw cause
     }.also { result ->
-      assertEquals("error in block", result.exceptionOrNull()!!.message)
+      assertSame(cause, result.exceptionOrNull())
     }
     assertEquals(false, loader.isLoading())
   }
@@ -67,11 +71,12 @@ class LoaderTest {
   @Test
   fun `test load when error in child coroutine`() = runTest {
     val loader = FLoader()
+    val cause = BusinessException(2)
     val job = async {
       loader.load {
         CoroutineScope(currentCoroutineContext()).launch {
           delay(100)
-          error("error in child")
+          throw cause
         }
         1
       }
@@ -84,7 +89,7 @@ class LoaderTest {
     assertEquals(false, job.isCompleted)
 
     // 子协程的普通异常包装为 Result.failure，不会直接抛出
-    assertEquals("error in child", job.await().exceptionOrNull()!!.message)
+    assertSame(cause, job.await().exceptionOrNull())
     assertEquals(false, loader.isLoading())
   }
 
@@ -362,7 +367,7 @@ class LoaderTest {
     assertEquals(false, loader.isLoading())
   }
 
-  @Test
+  @Test(timeout = 10_000)
   fun `test cancelAndJoin in block with NonCancellable`() = runTest {
     val loader = FLoader()
     // 即使用 NonCancellable 包裹，也不会死锁，而是抛出 Nested invoke
@@ -548,6 +553,64 @@ class LoaderTest {
   }
 
   @Test
+  fun `test load other loader in block when cancelled by new load`() = runTest {
+    val loader = FLoader()
+    val otherLoader = FLoader()
+    val container = mutableListOf<String>()
+    var exceptionInBlock: Throwable? = null
+    var otherException: Throwable? = null
+
+    val firstJob = async {
+      runCatching {
+        loader.load {
+          try {
+            otherLoader.load {
+              try {
+                delay(Long.MAX_VALUE)
+              } catch (e: CancellationException) {
+                exceptionInBlock = e
+                throw e
+              } finally {
+                withContext(NonCancellable) { delay(100) }
+                container.add("inner-cleaned")
+              }
+            }
+          } catch (e: CancellationException) {
+            otherException = e
+            throw e
+          }
+        }
+      }.exceptionOrNull()
+    }.also { runCurrent() }
+    assertEquals(true, loader.isLoading())
+    assertEquals(true, otherLoader.isLoading())
+
+    val nextJob = async {
+      loader.load {
+        assertEquals(listOf("inner-cleaned"), container)
+        assertEquals(false, otherLoader.isLoading())
+        container.add("new-load")
+        2
+      }
+    }.also { runCurrent() }
+
+    // 内层收到替换取消后仍在清理，新加载必须等待
+    assertEquals(true, exceptionInBlock is FLoader.ReplacedCancellationException)
+    assertEquals(false, firstJob.isCompleted)
+    assertEquals(false, nextJob.isCompleted)
+    assertEquals(emptyList<String>(), container)
+
+    advanceUntilIdle()
+    assertEquals(true, otherException is FLoader.ReplacedCancellationException)
+    assertEquals(true, firstJob.await() is FLoader.ReplacedCancellationException)
+    assertEquals(2, nextJob.await().getOrThrow())
+    assertEquals(listOf("inner-cleaned", "new-load"), container)
+    assertEquals(false, loader.isLoading())
+    assertEquals(false, otherLoader.isLoading())
+    assertEquals(3, otherLoader.tryLoad { 3 }.getOrThrow())
+  }
+
+  @Test
   fun `test tryLoad busy from other loader propagates`() = runTest {
     val loader = FLoader()
     val otherLoader = FLoader()
@@ -576,11 +639,12 @@ class LoaderTest {
   @Test
   fun `test tryLoad when error in block`() = runTest {
     val loader = FLoader()
+    val cause = BusinessException(3)
     loader.tryLoad {
       assertEquals(true, loader.isLoading())
-      error("error in block")
+      throw cause
     }.also { result ->
-      assertEquals("error in block", result.exceptionOrNull()!!.message)
+      assertSame(cause, result.exceptionOrNull())
     }
     assertEquals(false, loader.isLoading())
   }
@@ -734,10 +798,12 @@ class LoaderTest {
   }
 
   @Test
-  fun `test tryLoad when queued caller cancelled during previous cleanup`() = runTest {
+  fun `test tryLoad when queued caller cancelled with custom cause during previous cleanup`() = runTest {
     val loader = FLoader()
+    val cause = CustomCancellationException()
     var container = ""
     var cleanupStarted = false
+    var queuedException: Throwable? = null
 
     val loadingJob = launch {
       loader.load {
@@ -753,14 +819,25 @@ class LoaderTest {
       }
     }.also { runCurrent() }
 
-    val queuedJob = launch { loader.load { container += "2" } }.also { runCurrent() }
-    queuedJob.cancelAndJoin()
+    val queuedJob = launch {
+      try {
+        loader.load { container += "2" }
+      } catch (e: CancellationException) {
+        queuedException = e
+        throw e
+      }
+    }.also { runCurrent() }
+    val startTime = currentTime
+    queuedJob.cancel(cause)
+    runCurrent()
     // 排队任务已取消并完成，旧任务仍在清理
+    assertSame(cause, queuedException)
+    assertEquals(true, queuedJob.isCancelled)
     assertEquals(true, queuedJob.isCompleted)
     assertEquals(true, cleanupStarted)
     assertEquals(false, loadingJob.isCompleted)
     assertEquals("", container)
-    val startTime = currentTime
+    assertEquals(startTime, currentTime)
 
     runCatching { loader.tryLoad { container += "3" }.getOrThrow() }.also { result ->
       assertEquals(true, result.exceptionOrNull() is FLoader.BusyCancellationException)
@@ -1443,14 +1520,16 @@ class LoaderTest {
       assertEquals(1, result.getOrThrow())
     }
 
-    safeRunCatching { error("error in block") }.also { result ->
-      assertEquals("error in block", result.exceptionOrNull()!!.message)
+    val cause = BusinessException(4)
+    safeRunCatching { throw cause }.also { result ->
+      assertSame(cause, result.exceptionOrNull())
     }
 
+    val cancellation = CustomCancellationException()
     runCatching {
-      safeRunCatching { throw CancellationException() }
+      safeRunCatching { throw cancellation }
     }.also { result ->
-      assertEquals(true, result.exceptionOrNull() is CancellationException)
+      assertSame(cancellation, result.exceptionOrNull())
     }
   }
 }
