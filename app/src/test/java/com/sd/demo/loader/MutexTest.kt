@@ -158,6 +158,68 @@ class MutexTest {
   }
 
   @Test
+  fun `test withLock child failure waits for sibling cleanup before releasing lock`() = runTest {
+    val mutex = FMutex()
+    val cause = BusinessException(2)
+    val failChild = CompletableDeferred<Unit>()
+    val cleanupStarted = CompletableDeferred<Unit>()
+    val releaseCleanup = CompletableDeferred<Unit>()
+    val container = mutableListOf<String>()
+    val holderJob = async {
+      runCatching {
+        mutex.withLock {
+          val scope = CoroutineScope(currentCoroutineContext())
+          scope.launch {
+            try {
+              delay(Long.MAX_VALUE)
+            } finally {
+              withContext(NonCancellable) {
+                cleanupStarted.complete(Unit)
+                releaseCleanup.await()
+              }
+              container.add("sibling-cleaned")
+            }
+          }
+          scope.launch {
+            failChild.await()
+            throw cause
+          }
+          container.add("callback-returned")
+          1
+        }
+      }.exceptionOrNull()
+    }.also { runCurrent() }
+
+    try {
+      assertEquals(false, holderJob.isCompleted)
+      assertEquals(listOf("callback-returned"), container)
+      val waiterJob = async {
+        mutex.withLock {
+          container.add("waiter")
+          2
+        }
+      }.also { runCurrent() }
+      assertEquals(false, waiterJob.isCompleted)
+
+      failChild.complete(Unit)
+      runCurrent()
+      assertEquals(true, cleanupStarted.isCompleted)
+      assertEquals(false, holderJob.isCompleted)
+      assertEquals(false, waiterJob.isCompleted)
+      assertEquals(listOf("callback-returned"), container)
+
+      releaseCleanup.complete(Unit)
+      assertSame(cause, holderJob.await())
+      assertEquals(2, waiterJob.await())
+      assertEquals(listOf("callback-returned", "sibling-cleaned", "waiter"), container)
+    } finally {
+      failChild.complete(Unit)
+      releaseCleanup.complete(Unit)
+    }
+    assertEquals(3, mutex.withLock { 3 })
+  }
+
+  @Test
   fun `test withLock waits for child cancellation cleanup before releasing lock`() = runTest {
     val mutex = FMutex()
     val cleanupStarted = CompletableDeferred<Unit>()

@@ -1369,6 +1369,62 @@ class LoaderTest {
   }
 
   @Test
+  fun `test cancelAndJoin with NonCancellable waits for cleanup when caller already cancelled`() = runTest {
+    val loader = FLoader()
+    val cleanupStarted = CompletableDeferred<Unit>()
+    val releaseCleanup = CompletableDeferred<Unit>()
+    val container = mutableListOf<String>()
+    val firstJob = async {
+      runCatching {
+        loader.load {
+          try {
+            delay(Long.MAX_VALUE)
+          } finally {
+            withContext(NonCancellable) {
+              cleanupStarted.complete(Unit)
+              releaseCleanup.await()
+            }
+            container.add("old-cleaned")
+          }
+        }
+      }.exceptionOrNull()
+    }.also { runCurrent() }
+
+    try {
+      val queuedJob = async {
+        runCatching { loader.load { container.add("queued-load") } }.exceptionOrNull()
+      }.also { runCurrent() }
+      assertEquals(true, cleanupStarted.isCompleted)
+      assertEquals(false, queuedJob.isCompleted)
+
+      val cancelJob = launch {
+        currentCoroutineContext().cancel()
+        withContext(NonCancellable) {
+          loader.cancelAndJoin()
+          container.add("cancel-finished")
+        }
+      }.also { runCurrent() }
+
+      assertEquals(true, queuedJob.isCompleted)
+      assertTrue(queuedJob.await() is FLoader.ManualCancellationException)
+      assertEquals(true, cancelJob.isCancelled)
+      assertEquals(false, cancelJob.isCompleted)
+      assertEquals(false, firstJob.isCompleted)
+      assertEquals(true, loader.isLoading())
+      assertEquals(emptyList<String>(), container)
+
+      releaseCleanup.complete(Unit)
+      cancelJob.join()
+      assertTrue(firstJob.await() is FLoader.ReplacedCancellationException)
+      assertEquals(listOf("old-cleaned", "cancel-finished"), container)
+      assertEquals(false, loader.isLoading())
+      assertEquals(2, loader.tryLoad { 2 }.getOrThrow())
+    } finally {
+      releaseCleanup.complete(Unit)
+    }
+  }
+
+  @Test
   fun `test cancelAndJoin when caller already cancelled and load waiting previous cleanup`() = runTest {
     val loader = FLoader()
     var container = ""

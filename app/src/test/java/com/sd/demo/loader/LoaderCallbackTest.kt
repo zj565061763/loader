@@ -8,6 +8,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.async
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.channelFlow
@@ -30,6 +31,8 @@ import kotlin.coroutines.cancellation.CancellationException
 class LoaderCallbackTest(private val useTryLoad: Boolean) {
 
   private class BusinessException(val code: Int) : RuntimeException("child error: $code")
+
+  private class CustomCancellationException : CancellationException("custom cause")
 
   @Test
   fun `test load waits for child success`() = runTest {
@@ -184,6 +187,76 @@ class LoaderCallbackTest(private val useTryLoad: Boolean) {
   @Test
   fun `test replacement waits for children after callback returns`() = runTest {
     checkChildCancellation(replace = true)
+  }
+
+  @Test
+  fun `test caller cancellation after callback returns waits for child cleanup`() = runTest {
+    val loader = FLoader()
+    val cause = CustomCancellationException()
+    val cleanupStarted = CompletableDeferred<Unit>()
+    val releaseCleanup = CompletableDeferred<Unit>()
+    val container = mutableListOf<String>()
+    var childCause: Throwable? = null
+    var loadCause: Throwable? = null
+
+    loader.loadingFlow.test {
+      assertEquals(false, awaitItem())
+      val loading = launch {
+        try {
+          loader.loadForTest {
+            CoroutineScope(currentCoroutineContext()).launch {
+              try {
+                delay(Long.MAX_VALUE)
+              } catch (e: CancellationException) {
+                childCause = e
+                throw e
+              } finally {
+                withContext(NonCancellable) {
+                  cleanupStarted.complete(Unit)
+                  releaseCleanup.await()
+                }
+                container.add("child-cleaned")
+              }
+            }
+            container.add("callback-returned")
+            1
+          }
+          container.add("load-returned")
+        } catch (e: CancellationException) {
+          loadCause = e
+          throw e
+        }
+      }.also { runCurrent() }
+
+      try {
+        assertEquals(true, awaitItem())
+        assertEquals(listOf("callback-returned"), container)
+        assertEquals(false, loading.isCompleted)
+
+        loading.cancel(cause)
+        runCurrent()
+        assertEquals(true, cleanupStarted.isCompleted)
+        assertSame(cause, childCause)
+        assertEquals(true, loading.isCancelled)
+        assertEquals(false, loading.isCompleted)
+        assertEquals(null, loadCause)
+        assertEquals(true, loader.isLoading())
+        assertEquals(listOf("callback-returned"), container)
+        assertTrue(runCatching { loader.tryLoad { 2 } }.exceptionOrNull() is FLoader.BusyCancellationException)
+        expectNoEvents()
+
+        releaseCleanup.complete(Unit)
+        loading.join()
+        assertSame(cause, loadCause)
+        assertEquals(listOf("callback-returned", "child-cleaned"), container)
+        assertEquals(false, awaitItem())
+        assertEquals(false, loader.isLoading())
+      } finally {
+        releaseCleanup.complete(Unit)
+        loading.cancelAndJoin()
+      }
+    }
+    assertEquals(2, loader.tryLoad { 2 }.getOrThrow())
   }
 
   @Test
