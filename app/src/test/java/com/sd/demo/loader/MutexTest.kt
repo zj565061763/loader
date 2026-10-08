@@ -19,11 +19,13 @@ import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.yield
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertSame
 import org.junit.Test
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
+import kotlin.coroutines.cancellation.CancellationException
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class MutexTest {
@@ -132,6 +134,7 @@ class MutexTest {
       }.exceptionOrNull()
     }
     assertEquals(true, exception is IllegalStateException)
+    assertFalse(exception is CancellationException)
     assertEquals("Nested invoke", exception?.message)
   }
 
@@ -272,6 +275,7 @@ class MutexTest {
                 withTimeout(5_000) { mutex.withLock { } }
               }.also { result ->
                 assertEquals(true, result.exceptionOrNull() is IllegalStateException)
+                assertFalse(result.exceptionOrNull() is CancellationException)
                 assertEquals("Nested invoke", result.exceptionOrNull()!!.message)
               }
               assertEquals(1, otherMutex.withLock { 1 })
