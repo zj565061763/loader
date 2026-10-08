@@ -1,6 +1,7 @@
 package com.sd.demo.loader
 
 import com.sd.lib.loader.FMutex
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -69,6 +70,40 @@ class MutexTest {
     runCurrent()
 
     // 取消后锁应释放
+    assertEquals(1, mutex.withLock { 1 })
+  }
+
+  @Test
+  fun `test withLock when cancel waiter`() = runTest {
+    val mutex = FMutex()
+    val release = CompletableDeferred<Unit>()
+    val container = mutableListOf<String>()
+
+    val holderJob = launch {
+      mutex.withLock {
+        container.add("holder")
+        release.await()
+      }
+    }.also { runCurrent() }
+
+    try {
+      val waiterJob = launch {
+        mutex.withLock { container.add("waiter") }
+      }.also { runCurrent() }
+
+      // 持锁者未释放时取消等待者，等待者立即结束且回调不执行
+      waiterJob.cancel()
+      runCurrent()
+      assertEquals(true, waiterJob.isCompleted)
+      assertEquals(false, holderJob.isCompleted)
+      assertEquals(listOf("holder"), container)
+    } finally {
+      release.complete(Unit)
+    }
+    advanceUntilIdle()
+    assertEquals(listOf("holder"), container)
+
+    // 等待者取消不影响锁，后续仍能获取
     assertEquals(1, mutex.withLock { 1 })
   }
 
