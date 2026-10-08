@@ -71,6 +71,59 @@ class LoaderCallbackTest(private val useTryLoad: Boolean) {
   }
 
   @Test
+  fun `test child cancellation does not cancel load or sibling`() = runTest {
+    val loader = FLoader()
+    val cancelChild = CompletableDeferred<Unit>()
+    val releaseSibling = CompletableDeferred<Unit>()
+    val container = mutableListOf<String>()
+    var childCause: Throwable? = null
+
+    try {
+      loader.loadingFlow.test {
+        assertEquals(false, awaitItem())
+        val loading = async {
+          loader.loadForTest {
+            val scope = CoroutineScope(currentCoroutineContext())
+            scope.launch {
+              cancelChild.await()
+              throw CancellationException("child cancelled")
+            }.invokeOnCompletion {
+              childCause = it
+              container.add("child-cancelled")
+            }
+            scope.launch {
+              releaseSibling.await()
+              container.add("sibling-finished")
+            }
+            container.add("callback-returned")
+            1
+          }
+        }.also { runCurrent() }
+        assertEquals(true, awaitItem())
+
+        cancelChild.complete(Unit)
+        runCurrent()
+        assertTrue(childCause is CancellationException)
+        assertEquals(listOf("callback-returned", "child-cancelled"), container)
+        assertEquals(false, loading.isCompleted)
+        assertEquals(true, loader.isLoading())
+        assertTrue(runCatching { loader.tryLoad { 2 } }.exceptionOrNull() is FLoader.BusyCancellationException)
+        expectNoEvents()
+
+        releaseSibling.complete(Unit)
+        assertEquals(1, loading.await().getOrThrow())
+        assertEquals(listOf("callback-returned", "child-cancelled", "sibling-finished"), container)
+        assertEquals(false, awaitItem())
+        assertEquals(false, loader.isLoading())
+      }
+    } finally {
+      cancelChild.complete(Unit)
+      releaseSibling.complete(Unit)
+    }
+    assertEquals(2, loader.tryLoad { 2 }.getOrThrow())
+  }
+
+  @Test
   fun `test child failure waits for sibling cleanup`() = runTest {
     val loader = FLoader()
     val cause = BusinessException(1)

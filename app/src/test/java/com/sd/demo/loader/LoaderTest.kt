@@ -1176,6 +1176,51 @@ class LoaderTest {
     }
   }
 
+  @Test(timeout = 10_000)
+  fun `test concurrent tryLoad accepts only one caller`() = runTest {
+    withContext(Dispatchers.Default) {
+      repeat(100) {
+        val loader = FLoader()
+        val start = CompletableDeferred<Unit>()
+        val releaseLoad = CompletableDeferred<Unit>()
+        val attempted = List(16) { CompletableDeferred<Unit>() }
+        val entered = AtomicInteger()
+        val loadJobs = attempted.map { attempt ->
+          async {
+            start.await()
+            try {
+              loader.tryLoad {
+                entered.incrementAndGet()
+                attempt.complete(Unit)
+                releaseLoad.await()
+                1
+              }.getOrThrow()
+            } catch (_: FLoader.BusyCancellationException) {
+              attempt.complete(Unit)
+              null
+            }
+          }
+        }
+
+        try {
+          start.complete(Unit)
+          // 成功任务保持加载，其余调用必须立即判忙，不能等待它结束
+          withTimeout(5_000) { attempted.awaitAll() }
+          assertEquals(1, entered.get())
+          assertEquals(true, loader.isLoading())
+        } finally {
+          releaseLoad.complete(Unit)
+        }
+
+        val results = loadJobs.awaitAll()
+        assertEquals(1, results.count { it == 1 })
+        assertEquals(15, results.count { it == null })
+        assertEquals(false, loader.isLoading())
+        assertEquals(2, loader.tryLoad { 2 }.getOrThrow())
+      }
+    }
+  }
+
   @Test
   fun `test concurrent cancelAndJoin on multiple threads`() = runTest {
     withContext(Dispatchers.Default) {

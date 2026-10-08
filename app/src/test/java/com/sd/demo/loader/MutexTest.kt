@@ -3,13 +3,16 @@ package com.sd.demo.loader
 import app.cash.turbine.test
 import com.sd.lib.loader.FMutex
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.async
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.channelFlow
 import kotlinx.coroutines.flow.flow
@@ -113,6 +116,96 @@ class MutexTest {
     assertEquals(listOf("1-start"), container)
     advanceUntilIdle()
     assertEquals(listOf("1-start", "1-end", "2-start", "2-end"), container)
+  }
+
+  @Test
+  fun `test withLock waits for child success before releasing lock`() = runTest {
+    val mutex = FMutex()
+    val releaseChild = CompletableDeferred<Unit>()
+    val container = mutableListOf<String>()
+    val holderJob = async {
+      mutex.withLock {
+        CoroutineScope(currentCoroutineContext()).launch {
+          releaseChild.await()
+          container.add("child-finished")
+        }
+        container.add("callback-returned")
+        1
+      }
+    }.also { runCurrent() }
+
+    try {
+      assertEquals(listOf("callback-returned"), container)
+      assertEquals(false, holderJob.isCompleted)
+      val waiterJob = async {
+        mutex.withLock {
+          container.add("waiter")
+          2
+        }
+      }.also { runCurrent() }
+
+      assertEquals(false, waiterJob.isCompleted)
+      assertEquals(listOf("callback-returned"), container)
+
+      releaseChild.complete(Unit)
+      assertEquals(1, holderJob.await())
+      assertEquals(2, waiterJob.await())
+      assertEquals(listOf("callback-returned", "child-finished", "waiter"), container)
+    } finally {
+      releaseChild.complete(Unit)
+    }
+    assertEquals(3, mutex.withLock { 3 })
+  }
+
+  @Test
+  fun `test withLock waits for child cancellation cleanup before releasing lock`() = runTest {
+    val mutex = FMutex()
+    val cleanupStarted = CompletableDeferred<Unit>()
+    val releaseCleanup = CompletableDeferred<Unit>()
+    val container = mutableListOf<String>()
+    val holderJob = launch {
+      mutex.withLock {
+        CoroutineScope(currentCoroutineContext()).launch {
+          try {
+            delay(Long.MAX_VALUE)
+          } finally {
+            withContext(NonCancellable) {
+              cleanupStarted.complete(Unit)
+              releaseCleanup.await()
+            }
+            container.add("child-cleaned")
+          }
+        }
+        container.add("callback-returned")
+      }
+    }.also { runCurrent() }
+
+    try {
+      assertEquals(listOf("callback-returned"), container)
+      holderJob.cancel()
+      runCurrent()
+      assertEquals(true, cleanupStarted.isCompleted)
+      assertEquals(false, holderJob.isCompleted)
+      val waiterJob = async {
+        mutex.withLock {
+          container.add("waiter")
+          2
+        }
+      }.also { runCurrent() }
+
+      assertEquals(false, waiterJob.isCompleted)
+      assertEquals(listOf("callback-returned"), container)
+
+      releaseCleanup.complete(Unit)
+      holderJob.join()
+      assertEquals(true, holderJob.isCancelled)
+      assertEquals(2, waiterJob.await())
+      assertEquals(listOf("callback-returned", "child-cleaned", "waiter"), container)
+    } finally {
+      releaseCleanup.complete(Unit)
+      holderJob.cancelAndJoin()
+    }
+    assertEquals(3, mutex.withLock { 3 })
   }
 
   @Test
