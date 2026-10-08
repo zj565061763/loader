@@ -34,6 +34,7 @@ import org.junit.Test
 import java.util.concurrent.ConcurrentLinkedQueue
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicReference
 import kotlin.coroutines.cancellation.CancellationException
 
 @OptIn(ExperimentalCoroutinesApi::class)
@@ -1500,6 +1501,7 @@ class LoaderTest {
         val releaseLoad = CompletableDeferred<Unit>()
         val cleaned = AtomicBoolean()
         val loaded = AtomicBoolean()
+        val callbackCause = AtomicReference<CancellationException>()
 
         val firstJob = launch {
           runCatching {
@@ -1523,8 +1525,13 @@ class LoaderTest {
           val loadJob = async {
             runCatching {
               loader.load {
-                releaseLoad.await()
-                loaded.set(true)
+                try {
+                  releaseLoad.await()
+                  loaded.set(true)
+                } catch (e: CancellationException) {
+                  callbackCause.set(e)
+                  throw e
+                }
               }
             }.exceptionOrNull()
           }
@@ -1541,7 +1548,8 @@ class LoaderTest {
           cancelJob.join()
           releaseLoad.complete(Unit)
           // 无论调用方是否已取消，等待旧任务清理的 load 都会被取消
-          assertEquals(true, loadJob.await() is CancellationException)
+          assertTrue(loadJob.await() is FLoader.ManualCancellationException)
+          callbackCause.get()?.also { assertTrue(it is FLoader.ManualCancellationException) }
           assertEquals(false, loaded.get())
           firstJob.join()
           assertEquals(false, loader.isLoading())

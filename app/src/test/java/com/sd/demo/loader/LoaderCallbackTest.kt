@@ -7,7 +7,9 @@ import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
@@ -15,9 +17,11 @@ import kotlinx.coroutines.flow.channelFlow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.TestScope
+import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeout
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
@@ -34,7 +38,7 @@ class LoaderCallbackTest(private val useTryLoad: Boolean) {
 
   private class BusinessError(val code: Int) : Error("business error: $code")
 
-  private class CustomCancellationException : CancellationException("custom cause")
+  private class CustomCancellationException(val code: Int = 1) : CancellationException("custom cause: $code")
 
   @Test
   fun `test callback Error returns failure and releases loader`() = runTest {
@@ -282,6 +286,115 @@ class LoaderCallbackTest(private val useTryLoad: Boolean) {
   }
 
   @Test
+  fun `test swallowed manual cancellation cannot return result`() = runTest {
+    checkSwallowedCancellation(replace = false)
+  }
+
+  @Test
+  fun `test swallowed replacement cancellation cannot return result`() = runTest {
+    checkSwallowedCancellation(replace = true)
+  }
+
+  @Test
+  fun `test swallowed caller cancellation preserves original cause`() = runTest {
+    val loader = FLoader()
+    val cause = CustomCancellationException(2)
+    val container = mutableListOf<String>()
+    var callbackCause: Throwable? = null
+    var loadCause: Throwable? = null
+
+    loader.loadingFlow.test {
+      assertEquals(false, awaitItem())
+      val loading = launch {
+        loadCause = runCatching {
+          loader.loadForTest {
+            try {
+              awaitCancellation()
+            } catch (e: CancellationException) {
+              callbackCause = e
+              container.add("callback-returned")
+              1
+            }
+          }
+          container.add("load-returned")
+        }.exceptionOrNull()
+      }.also { runCurrent() }
+
+      try {
+        assertEquals(true, awaitItem())
+        assertEquals(false, loading.isCompleted)
+        loading.cancel(cause)
+        loading.join()
+
+        assertSame(cause, callbackCause)
+        assertSame(cause, loadCause)
+        assertEquals(true, loading.isCancelled)
+        assertEquals(listOf("callback-returned"), container)
+        assertEquals(false, awaitItem())
+        assertEquals(false, loader.isLoading())
+      } finally {
+        loading.cancelAndJoin()
+      }
+    }
+    assertEquals(2, loader.tryLoad { 2 }.getOrThrow())
+  }
+
+  @Test
+  fun `test outer timeout waits for child cleanup`() = runTest {
+    val loader = FLoader()
+    val cleanupStarted = CompletableDeferred<Unit>()
+    val releaseCleanup = CompletableDeferred<Unit>()
+    var childCause: Throwable? = null
+
+    loader.loadingFlow.test {
+      assertEquals(false, awaitItem())
+      val loading = async {
+        runCatching {
+          withTimeout(100) {
+            loader.loadForTest {
+              CoroutineScope(currentCoroutineContext()).launch {
+                try {
+                  awaitCancellation()
+                } catch (e: CancellationException) {
+                  childCause = e
+                  throw e
+                } finally {
+                  withContext(NonCancellable) {
+                    cleanupStarted.complete(Unit)
+                    releaseCleanup.await()
+                  }
+                }
+              }
+              1
+            }
+          }
+        }.exceptionOrNull()
+      }.also { runCurrent() }
+
+      try {
+        assertEquals(true, awaitItem())
+        advanceTimeBy(100)
+        runCurrent()
+        assertEquals(true, cleanupStarted.isCompleted)
+        assertTrue(childCause is TimeoutCancellationException)
+        assertEquals(false, loading.isCompleted)
+        assertEquals(true, loader.isLoading())
+        assertTrue(runCatching { loader.tryLoad { 2 } }.exceptionOrNull() is FLoader.BusyCancellationException)
+        expectNoEvents()
+
+        releaseCleanup.complete(Unit)
+        assertTrue(loading.await() is TimeoutCancellationException)
+        assertEquals(false, awaitItem())
+        assertEquals(false, loader.isLoading())
+      } finally {
+        releaseCleanup.complete(Unit)
+        loading.cancelAndJoin()
+      }
+    }
+    assertEquals(3, loader.tryLoad { 3 }.getOrThrow())
+  }
+
+  @Test
   fun `test caller cancellation after callback returns waits for child cleanup`() = runTest {
     val loader = FLoader()
     val cause = CustomCancellationException()
@@ -392,6 +505,49 @@ class LoaderCallbackTest(private val useTryLoad: Boolean) {
 
   private suspend fun <T> FLoader.loadForTest(onLoad: suspend () -> T): Result<T> {
     return if (useTryLoad) tryLoad(onLoad) else load(onLoad)
+  }
+
+  private suspend fun TestScope.checkSwallowedCancellation(replace: Boolean) {
+    val loader = FLoader()
+    val container = mutableListOf<String>()
+    var callbackCause: Throwable? = null
+    val loading = async {
+      runCatching {
+        loader.loadForTest {
+          try {
+            awaitCancellation()
+          } catch (e: CancellationException) {
+            callbackCause = e
+            container.add("callback-returned")
+            1
+          }
+        }
+        container.add("load-returned")
+      }.exceptionOrNull()
+    }.also { runCurrent() }
+
+    try {
+      assertEquals(true, loader.isLoading())
+      assertEquals(false, loading.isCompleted)
+      if (replace) {
+        loader.load {
+          container.add("new-load")
+          2
+        }.also { assertEquals(2, it.getOrThrow()) }
+      } else {
+        loader.cancelAndJoin()
+      }
+
+      val cause = loading.await()
+      assertTrue(if (replace) callbackCause is FLoader.ReplacedCancellationException else callbackCause is FLoader.ManualCancellationException)
+      assertTrue(if (replace) cause is FLoader.ReplacedCancellationException else cause is FLoader.ManualCancellationException)
+      val expected = if (replace) listOf("callback-returned", "new-load") else listOf("callback-returned")
+      assertEquals(expected, container)
+      assertEquals(false, loader.isLoading())
+    } finally {
+      loading.cancelAndJoin()
+    }
+    assertEquals(3, loader.tryLoad { 3 }.getOrThrow())
   }
 
   private suspend fun TestScope.checkChildCancellation(replace: Boolean) {

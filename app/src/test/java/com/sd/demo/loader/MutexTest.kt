@@ -10,6 +10,7 @@ import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.async
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.currentCoroutineContext
@@ -37,6 +38,8 @@ import kotlin.coroutines.cancellation.CancellationException
 class MutexTest {
 
   private class BusinessException(val code: Int) : RuntimeException("business error: $code")
+
+  private class CustomCancellationException(val code: Int) : CancellationException("caller cancelled: $code")
 
   @Test
   fun `test withLock`() = runTest {
@@ -391,6 +394,85 @@ class MutexTest {
     assertEquals(true, exception is IllegalStateException)
     assertFalse(exception is CancellationException)
     assertEquals("Nested invoke", exception?.message)
+  }
+
+  @Test
+  fun `test withLock when caller already cancelled and mutex idle`() = runTest {
+    val mutex = FMutex()
+    val cause = CustomCancellationException(1)
+    var entered = false
+    var thrown: Throwable? = null
+    val caller = launch {
+      currentCoroutineContext().cancel(cause)
+      thrown = runCatching { mutex.withLock { entered = true } }.exceptionOrNull()
+    }.also { runCurrent() }
+
+    assertEquals(true, caller.isCancelled)
+    assertEquals(true, caller.isCompleted)
+    assertSame(cause, thrown)
+    assertEquals(false, entered)
+    assertEquals(2, mutex.withLock { 2 })
+  }
+
+  @Test
+  fun `test withLock when caller already cancelled and mutex locked`() = runTest {
+    val mutex = FMutex()
+    val cause = CustomCancellationException(2)
+    val release = CompletableDeferred<Unit>()
+    var entered = false
+    var thrown: Throwable? = null
+    val holder = launch { mutex.withLock { release.await() } }.also { runCurrent() }
+
+    try {
+      val caller = launch {
+        currentCoroutineContext().cancel(cause)
+        thrown = runCatching { mutex.withLock { entered = true } }.exceptionOrNull()
+      }.also { runCurrent() }
+
+      assertEquals(true, caller.isCancelled)
+      assertEquals(true, caller.isCompleted)
+      assertSame(cause, thrown)
+      assertEquals(false, entered)
+      assertEquals(false, holder.isCancelled)
+      assertEquals(false, holder.isCompleted)
+      release.complete(Unit)
+      holder.join()
+      assertEquals(false, holder.isCancelled)
+    } finally {
+      release.complete(Unit)
+      holder.cancelAndJoin()
+    }
+    assertEquals(3, mutex.withLock { 3 })
+  }
+
+  @Test(timeout = 10_000)
+  fun `test uncaught nested error releases lock for waiter`() = runTest {
+    val mutex = FMutex()
+    val invokeNested = CompletableDeferred<Unit>()
+    val holder = async {
+      runCatching {
+        mutex.withLock {
+          invokeNested.await()
+          withTimeout(5_000) { mutex.withLock { 1 } }
+        }
+      }.exceptionOrNull()
+    }.also { runCurrent() }
+    val waiter = async { mutex.withLock { 2 } }.also { runCurrent() }
+
+    try {
+      assertEquals(false, waiter.isCompleted)
+      invokeNested.complete(Unit)
+      val cause = holder.await()
+      assertEquals(true, cause is IllegalStateException)
+      assertFalse(cause is CancellationException)
+      assertEquals("Nested invoke", cause?.message)
+      assertEquals(2, waiter.await())
+      assertEquals(3, mutex.withLock { 3 })
+    } finally {
+      invokeNested.complete(Unit)
+      holder.cancelAndJoin()
+      waiter.cancelAndJoin()
+    }
   }
 
   @Test
