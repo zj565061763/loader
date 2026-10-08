@@ -12,6 +12,7 @@ import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.test.currentTime
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.withContext
@@ -40,14 +41,18 @@ class MutatorTest {
       val cleanupStarted = CompletableDeferred<Unit>()
       val releaseCleanup = CompletableDeferred<Unit>()
       val queuedEntered = AtomicBoolean()
-      val mutator = FMutator(newReplaceCause = {
-        if (replacements.incrementAndGet() == 2) {
-          // 暂停最新任务的取消操作，保留旧排队任务恢复执行的窗口
-          newestRegistered.complete(Unit)
-          check(allowNewestCancel.await(5, TimeUnit.SECONDS))
-        }
-        FLoader.ReplacedCancellationException()
-      })
+      val tryEntered = AtomicBoolean()
+      val mutator = FMutator(
+        newReplaceCause = {
+          if (replacements.incrementAndGet() == 2) {
+            // 暂停最新任务的取消操作，保留旧排队任务恢复执行的窗口
+            newestRegistered.complete(Unit)
+            check(allowNewestCancel.await(5, TimeUnit.SECONDS))
+          }
+          FLoader.ReplacedCancellationException()
+        },
+        newBusyCause = { FLoader.BusyCancellationException() },
+      )
 
       val first = async {
         runCatching {
@@ -81,6 +86,14 @@ class MutatorTest {
         assertEquals(true, queued.isCompleted)
         assertTrue(queued.await() is FLoader.ReplacedCancellationException)
         assertTrue(first.await() is FLoader.ReplacedCancellationException)
+
+        // 旧任务已结束，最新任务已登记但尚未执行，仍须立即判忙
+        val startTime = currentTime
+        val busyCause = runCatching { mutator.mutateOrThrow { tryEntered.set(true) } }.exceptionOrNull()
+        assertTrue(busyCause is FLoader.BusyCancellationException)
+        assertEquals(startTime, currentTime)
+        assertEquals(false, tryEntered.get())
+        assertEquals(false, latest.isCancelled)
 
         allowNewestCancel.countDown()
         assertEquals(3, latest.await())

@@ -95,7 +95,7 @@
 | `LoaderTest` | 加载结果、取消、排队、多线程和状态流 |
 | `LoaderCallbackTest` | `load` 与 `tryLoad` 的子协程生命周期和 Flow 上下文约束 |
 | `LoaderQueuedCleanupTest` | `load` 与 `tryLoad` 发起的任务在排队调用方取消后仍保持忙状态和清理等待 |
-| `MutatorTest` | 新任务登记后尚未发起取消时的排队任务替换和手动取消 |
+| `MutatorTest` | 新任务登记后尚未发起取消时的排队任务替换、手动取消和忙状态 |
 | `MutexTest` | 互斥、锁释放、嵌套和 Flow 上下文约束 |
 
 ## 编码与发布约定
