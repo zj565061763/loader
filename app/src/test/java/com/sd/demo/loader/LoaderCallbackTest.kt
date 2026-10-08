@@ -180,6 +180,61 @@ class LoaderCallbackTest(private val useTryLoad: Boolean) {
   }
 
   @Test
+  fun `test callback failure cancels child and waits for cleanup`() = runTest {
+    val loader = FLoader()
+    val cause = BusinessException(2)
+    val childStarted = CompletableDeferred<Unit>()
+    val failCallback = CompletableDeferred<Unit>()
+    val cleanupStarted = CompletableDeferred<Unit>()
+    val releaseCleanup = CompletableDeferred<Unit>()
+
+    loader.loadingFlow.test {
+      assertEquals(false, awaitItem())
+      val loading = async {
+        loader.loadForTest {
+          CoroutineScope(currentCoroutineContext()).launch {
+            try {
+              childStarted.complete(Unit)
+              delay(Long.MAX_VALUE)
+            } finally {
+              withContext(NonCancellable) {
+                cleanupStarted.complete(Unit)
+                releaseCleanup.await()
+              }
+            }
+          }
+          childStarted.await()
+          failCallback.await()
+          throw cause
+        }
+      }.also { runCurrent() }
+
+      try {
+        assertEquals(true, awaitItem())
+        assertEquals(true, childStarted.isCompleted)
+
+        failCallback.complete(Unit)
+        runCurrent()
+        assertEquals(true, cleanupStarted.isCompleted)
+        assertEquals(false, loading.isCompleted)
+        assertEquals(true, loader.isLoading())
+        assertTrue(runCatching { loader.tryLoad { 2 } }.exceptionOrNull() is FLoader.BusyCancellationException)
+        expectNoEvents()
+
+        releaseCleanup.complete(Unit)
+        assertSame(cause, loading.await().exceptionOrNull())
+        assertEquals(false, awaitItem())
+        assertEquals(false, loader.isLoading())
+      } finally {
+        failCallback.complete(Unit)
+        releaseCleanup.complete(Unit)
+        loading.cancelAndJoin()
+      }
+    }
+    assertEquals(2, loader.tryLoad { 2 }.getOrThrow())
+  }
+
+  @Test
   fun `test cancelAndJoin waits for children after callback returns`() = runTest {
     checkChildCancellation(replace = false)
   }
