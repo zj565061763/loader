@@ -1593,6 +1593,11 @@ class LoaderTest {
       assertSame(cause, result.exceptionOrNull())
     }
 
+    val error = AssertionError("block failed")
+    safeRunCatching { throw error }.also { result ->
+      assertSame(error, result.exceptionOrNull())
+    }
+
     val cancellation = CustomCancellationException()
     runCatching {
       safeRunCatching { throw cancellation }

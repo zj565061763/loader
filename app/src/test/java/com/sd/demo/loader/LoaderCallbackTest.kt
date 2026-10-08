@@ -32,7 +32,44 @@ class LoaderCallbackTest(private val useTryLoad: Boolean) {
 
   private class BusinessException(val code: Int) : RuntimeException("child error: $code")
 
+  private class BusinessError(val code: Int) : Error("business error: $code")
+
   private class CustomCancellationException : CancellationException("custom cause")
+
+  @Test
+  fun `test callback Error returns failure and releases loader`() = runTest {
+    val loader = FLoader()
+    val cause = BusinessError(1)
+
+    val result = loader.loadForTest {
+      assertEquals(true, loader.isLoading())
+      throw cause
+    }
+
+    assertSame(cause, result.exceptionOrNull())
+    assertEquals(false, loader.isLoading())
+    assertEquals(1, loader.tryLoad { 1 }.getOrThrow())
+    assertEquals(false, loader.isLoading())
+  }
+
+  @Test
+  fun `test child Error returns failure and releases loader`() = runTest {
+    val loader = FLoader()
+    val cause = BusinessError(2)
+
+    val result = loader.loadForTest {
+      CoroutineScope(currentCoroutineContext()).launch {
+        assertEquals(true, loader.isLoading())
+        throw cause
+      }
+      1
+    }
+
+    assertSame(cause, result.exceptionOrNull())
+    assertEquals(false, loader.isLoading())
+    assertEquals(2, loader.tryLoad { 2 }.getOrThrow())
+    assertEquals(false, loader.isLoading())
+  }
 
   @Test
   fun `test load waits for child success`() = runTest {
