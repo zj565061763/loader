@@ -1,3 +1,5 @@
+import org.jetbrains.kotlin.gradle.tasks.KotlinCompile
+
 plugins {
   alias(libs.plugins.android.application)
   alias(libs.plugins.kotlin.android)
@@ -65,4 +67,13 @@ dependencies {
   androidTestImplementation(libs.androidx.test.espresso.core)
 
   implementation(project(":lib"))
+}
+
+tasks.withType<KotlinCompile>().configureEach {
+  if (name.endsWith("UnitTestKotlin")) {
+    val libBuildDirectory = project(":lib").layout.buildDirectory
+    friendPaths.from(libraries.filter {
+      it.toPath().startsWith(libBuildDirectory.get().asFile.toPath())
+    })
+  }
 }

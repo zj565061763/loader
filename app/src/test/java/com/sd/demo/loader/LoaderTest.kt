@@ -989,6 +989,61 @@ class LoaderTest {
   }
 
   @Test
+  fun `test cancelling newest queued caller does not revive replaced load`() = runTest {
+    val loader = FLoader()
+    val cause = CustomCancellationException()
+    val releaseCleanup = CompletableDeferred<Unit>()
+    val container = mutableListOf<Int>()
+    var latestException: Throwable? = null
+    val firstJob = async {
+      runCatching {
+        loader.load {
+          try {
+            delay(Long.MAX_VALUE)
+          } finally {
+            withContext(NonCancellable) { releaseCleanup.await() }
+            container.add(1)
+          }
+        }
+      }.exceptionOrNull()
+    }.also { runCurrent() }
+
+    try {
+      val queuedJob = async {
+        runCatching { loader.load { container.add(2) } }.exceptionOrNull()
+      }.also { runCurrent() }
+      val latestJob = launch {
+        try {
+          loader.load { container.add(3) }.getOrThrow()
+        } catch (e: CancellationException) {
+          latestException = e
+          throw e
+        }
+      }.also { runCurrent() }
+
+      latestJob.cancel(cause)
+      runCurrent()
+      assertEquals(true, latestJob.isCompleted)
+      assertSame(cause, latestException)
+      assertEquals(true, queuedJob.isCompleted)
+      assertTrue(queuedJob.await() is FLoader.ReplacedCancellationException)
+      assertEquals(false, firstJob.isCompleted)
+      assertEquals(emptyList<Int>(), container)
+      assertTrue(runCatching { loader.tryLoad { container.add(4) } }.exceptionOrNull() is FLoader.BusyCancellationException)
+
+      releaseCleanup.complete(Unit)
+      assertTrue(firstJob.await() is FLoader.ReplacedCancellationException)
+      runCurrent()
+      assertEquals(listOf(1), container)
+      assertEquals(false, loader.isLoading())
+      loader.tryLoad { container.add(4) }.getOrThrow()
+      assertEquals(listOf(1, 4), container)
+    } finally {
+      releaseCleanup.complete(Unit)
+    }
+  }
+
+  @Test
   fun `test load when caller already cancelled`() = runTest {
     val loader = FLoader()
     var container = ""
@@ -1200,6 +1255,71 @@ class LoaderTest {
           if (exception != null && exception !is FLoader.ManualCancellationException) throw exception
         }
       }
+    }
+  }
+
+  @Test
+  fun `test cancelAndJoin when caller cancelled while waiting cleanup`() = runTest {
+    val loader = FLoader()
+    val cause = CustomCancellationException()
+    val cleanupStarted = CompletableDeferred<Unit>()
+    val releaseCleanup = CompletableDeferred<Unit>()
+    val container = mutableListOf<String>()
+    var cancelException: Throwable? = null
+    val firstJob = async {
+      runCatching {
+        loader.load {
+          try {
+            delay(Long.MAX_VALUE)
+          } finally {
+            withContext(NonCancellable) {
+              cleanupStarted.complete(Unit)
+              releaseCleanup.await()
+            }
+            container.add("old-cleaned")
+          }
+        }
+      }.exceptionOrNull()
+    }.also { runCurrent() }
+
+    try {
+      val cancelJob = launch {
+        try {
+          loader.cancelAndJoin()
+        } catch (e: CancellationException) {
+          cancelException = e
+          throw e
+        }
+      }.also { runCurrent() }
+      assertEquals(true, cleanupStarted.isCompleted)
+      assertEquals(false, cancelJob.isCompleted)
+
+      val nextJob = async {
+        loader.load {
+          container.add("new-load")
+          2
+        }
+      }.also { runCurrent() }
+      cancelJob.cancel(cause)
+      runCurrent()
+
+      assertEquals(true, cancelJob.isCancelled)
+      assertEquals(true, cancelJob.isCompleted)
+      assertSame(cause, cancelException)
+      assertEquals(false, firstJob.isCompleted)
+      assertEquals(false, nextJob.isCompleted)
+      assertEquals(true, loader.isLoading())
+      assertEquals(emptyList<String>(), container)
+      assertTrue(runCatching { loader.tryLoad { 3 } }.exceptionOrNull() is FLoader.BusyCancellationException)
+
+      releaseCleanup.complete(Unit)
+      assertTrue(firstJob.await() is FLoader.ManualCancellationException)
+      assertEquals(2, nextJob.await().getOrThrow())
+      assertEquals(listOf("old-cleaned", "new-load"), container)
+      assertEquals(false, loader.isLoading())
+      assertEquals(3, loader.tryLoad { 3 }.getOrThrow())
+    } finally {
+      releaseCleanup.complete(Unit)
     }
   }
 

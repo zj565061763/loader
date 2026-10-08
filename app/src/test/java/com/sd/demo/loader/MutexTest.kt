@@ -1,5 +1,6 @@
 package com.sd.demo.loader
 
+import app.cash.turbine.test
 import com.sd.lib.loader.FMutex
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineStart
@@ -10,6 +11,8 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.channelFlow
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.joinAll
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.advanceUntilIdle
@@ -48,6 +51,41 @@ class MutexTest {
       assertEquals("error in block", result.exceptionOrNull()!!.message)
     }
     // 锁应已释放，可再次获取
+    assertEquals(2, mutex.withLock { 2 })
+  }
+
+  @Test
+  fun `test emit inside withLock fails and releases lock`() = runTest {
+    val mutex = FMutex()
+    flow<Int> {
+      mutex.withLock { emit(1) }
+    }.test {
+      assertEquals(true, awaitError() is IllegalStateException)
+    }
+    assertEquals(2, mutex.withLock { 2 })
+  }
+
+  @Test
+  fun `test send inside withLock with channelFlow`() = runTest {
+    val mutex = FMutex()
+    channelFlow {
+      mutex.withLock { send(1) }
+    }.test {
+      assertEquals(1, awaitItem())
+      awaitComplete()
+    }
+    assertEquals(2, mutex.withLock { 2 })
+  }
+
+  @Test
+  fun `test emit outside withLock with flow`() = runTest {
+    val mutex = FMutex()
+    flow {
+      emit(mutex.withLock { 1 })
+    }.test {
+      assertEquals(1, awaitItem())
+      awaitComplete()
+    }
     assertEquals(2, mutex.withLock { 2 })
   }
 
