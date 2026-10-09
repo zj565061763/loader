@@ -57,7 +57,7 @@
 - 已取消的调用方不能取消其他加载：`mutate` 进入时先检查 `ensureActive`，再取消上一个任务
 - `doLoad` 只把普通异常转换为 `Result.failure`；`CancellationException` 必须重新抛出，不能被包装或吞掉。公开的 `safeRunCatching` 也遵循相同规则
 - `doLoad` 必须用 `coroutineScope` 包裹 `onLoad`：`onLoad` 用当前上下文启动的子协程挂在这个 scope 上，否则子协程的普通异常会绕过 `Result.failure`，`isLoading` 也会在子协程结束前变为 `false`
-- `onLoad` 返回后、创建 `Result.success` 前必须调用 `currentCoroutineContext().ensureActive()`，避免已取消的协程错误地报告成功
+- `onLoad` 返回后、创建 `Result.success` 前再次调用 `currentCoroutineContext().ensureActive()`，作为防御性检查
 - `isLoading` 在调用 `onLoad` 前设为 `true`，并在 `finally` 中恢复为 `false`。重新加载时会依次更新为 `false`、`true`，但 `StateFlow` 可能合并快速更新，收集者不保证收到完整序列
 
 ### `FMutator`
@@ -95,10 +95,10 @@
 | 测试类 | 覆盖范围 |
 |---|---|
 | `LoaderTest` | 加载结果、取消、排队、多线程和状态流 |
-| `LoaderCallbackTest` | `load` 与 `tryLoad` 的异常包装、子协程生命周期和 Flow 上下文约束 |
+| `LoaderCallbackTest` | `load` 与 `tryLoad` 的异常包装、子协程生命周期、线程上下文安装期间的取消和 Flow 上下文约束 |
 | `LoaderQueuedCleanupTest` | `load` 与 `tryLoad` 发起的任务在排队调用方取消后仍保持忙状态和清理等待 |
 | `LoaderReferenceTest` | `load` 与 `tryLoad` 在成功、普通异常和取消异常退出后释放结果及异常数据，以及排队加载取消后的异常数据释放 |
-| `MutatorTest` | 新任务登记后尚未发起取消时的排队任务替换、手动取消和忙状态 |
+| `MutatorTest` | 已取消调用方的任务登记，以及新任务登记后尚未发起取消时的排队任务替换、手动取消和忙状态 |
 | `MutexTest` | 互斥、锁释放、嵌套和 Flow 上下文约束 |
 
 ## 编码与发布约定

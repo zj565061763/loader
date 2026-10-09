@@ -25,12 +25,52 @@ import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
+import kotlin.coroutines.AbstractCoroutineContextElement
+import kotlin.coroutines.CoroutineContext
 import kotlin.coroutines.cancellation.CancellationException
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class MutatorTest {
 
   private class CallerCancellationException(val code: Int) : CancellationException("caller cancelled: $code")
+
+  @Test(timeout = 10_000)
+  fun `test already cancelled tryLoad does not make idle loader busy`() = runTest {
+    Executors.newSingleThreadExecutor().asCoroutineDispatcher().use { callerDispatcher ->
+      val loader = FLoader()
+      val cause = CallerCancellationException(2)
+      val callerPaused = CompletableDeferred<Unit>()
+      val releaseCaller = CountDownLatch(1)
+      val callbackEntered = AtomicBoolean()
+      var thrown: Throwable? = null
+      val contextProbe = PauseOnRepeatedContextKey {
+        callerPaused.complete(Unit)
+        check(releaseCaller.await(5, TimeUnit.SECONDS))
+      }
+      val caller = launch(callerDispatcher + contextProbe) {
+        currentCoroutineContext().cancel(cause)
+        contextProbe.arm()
+        thrown = runCatching { loader.tryLoad { callbackEntered.set(true) } }.exceptionOrNull()
+        // 入口检查直接退出时，也保持调用方暂停，让另一任务验证空闲状态
+        callerPaused.complete(Unit)
+        check(releaseCaller.await(5, TimeUnit.SECONDS))
+      }
+
+      try {
+        callerPaused.await()
+        assertEquals(false, caller.isCompleted)
+        assertEquals(2, loader.tryLoad { 2 }.getOrThrow())
+      } finally {
+        releaseCaller.countDown()
+        caller.join()
+      }
+
+      assertSame(cause, thrown)
+      assertEquals(false, callbackEntered.get())
+      assertEquals(false, loader.isLoading())
+      assertEquals(3, loader.tryLoad { 3 }.getOrThrow())
+    }
+  }
 
   @Test(timeout = 10_000)
   fun `test queued task cannot run after newer task registered before cancellation`() = runTest {
@@ -175,5 +215,29 @@ class MutatorTest {
         latest.cancelAndJoin()
       }
     }
+  }
+
+  private class PauseOnRepeatedContextKey(private val onRepeatedKey: () -> Unit) : AbstractCoroutineContextElement(Key) {
+    private var _armed = false
+    private var _firstKey: CoroutineContext.Key<*>? = null
+
+    fun arm() {
+      _armed = true
+    }
+
+    override fun <E : CoroutineContext.Element> get(key: CoroutineContext.Key<E>): E? {
+      if (_armed) {
+        // 首次查询来自入口嵌套检查，再次查询同一 key 时任务已登记
+        if (_firstKey == null) {
+          _firstKey = key
+        } else if (key === _firstKey) {
+          _armed = false
+          onRepeatedKey()
+        }
+      }
+      return super.get(key)
+    }
+
+    companion object Key : CoroutineContext.Key<PauseOnRepeatedContextKey>
   }
 }

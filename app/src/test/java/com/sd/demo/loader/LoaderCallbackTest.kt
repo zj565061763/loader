@@ -6,7 +6,9 @@ import com.sd.lib.loader.loadingFlow
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.ThreadContextElement
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitCancellation
@@ -28,6 +30,8 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.junit.runners.Parameterized
+import kotlin.coroutines.AbstractCoroutineContextElement
+import kotlin.coroutines.CoroutineContext
 import kotlin.coroutines.cancellation.CancellationException
 
 @OptIn(ExperimentalCoroutinesApi::class)
@@ -39,6 +43,26 @@ class LoaderCallbackTest(private val useTryLoad: Boolean) {
   private class BusinessError(val code: Int) : Error("business error: $code")
 
   private class CustomCancellationException(val code: Int = 1) : CancellationException("custom cause: $code")
+
+  @Test
+  fun `test cancellation during thread context installation prevents callback`() = runTest {
+    val loader = FLoader()
+    val cause = CustomCancellationException(3)
+    val contextElement = CancelOnContextInstall(cause)
+    var callbackEntered = false
+    var thrown: Throwable? = null
+    val caller = launch(contextElement) {
+      contextElement.arm()
+      thrown = runCatching { loader.loadForTest { callbackEntered = true } }.exceptionOrNull()
+    }
+    caller.join()
+
+    assertEquals(true, contextElement.didCancel)
+    assertSame(cause, thrown)
+    assertEquals(false, callbackEntered)
+    assertEquals(false, loader.isLoading())
+    assertEquals(1, loader.tryLoad { 1 }.getOrThrow())
+  }
 
   @Test
   fun `test callback Error returns failure and releases loader`() = runTest {
@@ -609,6 +633,28 @@ class LoaderCallbackTest(private val useTryLoad: Boolean) {
       releaseCleanup.complete(Unit)
     }
     assertEquals(3, loader.tryLoad { 3 }.getOrThrow())
+  }
+
+  private class CancelOnContextInstall(private val cause: CancellationException) : ThreadContextElement<Unit>, AbstractCoroutineContextElement(Key) {
+    private var _armed = false
+    var didCancel = false
+      private set
+
+    fun arm() {
+      _armed = true
+    }
+
+    override fun updateThreadContext(context: CoroutineContext) {
+      if (_armed) {
+        _armed = false
+        context[Job]!!.cancel(cause)
+        didCancel = true
+      }
+    }
+
+    override fun restoreThreadContext(context: CoroutineContext, oldState: Unit) = Unit
+
+    companion object Key : CoroutineContext.Key<CancelOnContextInstall>
   }
 
   companion object {
