@@ -11,6 +11,7 @@ import kotlinx.coroutines.flow.channelFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.withTimeoutOrNull
@@ -34,6 +35,7 @@ interface FLoader {
    * 被新的[load]取消时抛出[ReplacedCancellationException]，
    * 被调用方取消时抛出调用方的取消原因，都不会返回[Result]。
    * 例如外层 Loader 被[cancelAndJoin]取消时，在其加载回调中调用的[load]抛出的也是[ManualCancellationException]。
+   * 在[NonCancellable]中调用时只是不会被调用方取消，仍会被[cancelAndJoin]或新的[load]取消。
    *
    * [onLoad]内收到的取消异常也是这些类型。
    * [onLoad]抛出的普通异常会包装为[Result.failure]，[CancellationException]会原样抛出。

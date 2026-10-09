@@ -6,6 +6,10 @@
 
 - **修复 `onLoad` 中启动的子协程失败时异常直接从 `load` 抛出**：此前在 `onLoad` 中用当前协程上下文启动子协程（如 `CoroutineScope(currentCoroutineContext()).launch`）时，`onLoad` 一返回 `isLoading` 就变为 `false`，子协程的普通异常会直接从 `load` / `tryLoad` 抛出。现在加载会等子协程结束，子协程的普通异常包装为 `Result.failure`。
 
+### 📝 Documentation
+
+- **补充 `NonCancellable` 中调用 `load` 的说明**：在 `NonCancellable` 中调用 `load` 只是不会被调用方取消，仍会被 `cancelAndJoin()` 或新的 `load` 取消。
+
 ## 1.9.0
 
 ### 🐛 Bug Fixes

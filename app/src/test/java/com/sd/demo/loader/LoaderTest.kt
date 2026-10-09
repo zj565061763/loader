@@ -20,6 +20,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.TestCoroutineScheduler
+import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.currentTime
 import kotlinx.coroutines.test.runCurrent
@@ -1463,6 +1464,40 @@ class LoaderTest {
   }
 
   @Test
+  fun `test load other loader in NonCancellable cleanup when caller cancelled`() = runTest {
+    val loader = FLoader()
+    val otherLoader = FLoader()
+    var cleanupResult: Int? = null
+
+    val job = launch {
+      try {
+        loader.load { delay(Long.MAX_VALUE) }
+      } finally {
+        // 调用方已取消，NonCancellable 中的加载仍正常执行并返回结果
+        withContext(NonCancellable) {
+          cleanupResult = otherLoader.load { 1 }.getOrThrow()
+        }
+      }
+    }.also { runCurrent() }
+
+    job.cancelAndJoin()
+    assertEquals(1, cleanupResult)
+    assertEquals(false, loader.isLoading())
+    assertEquals(false, otherLoader.isLoading())
+    assertEquals(2, otherLoader.tryLoad { 2 }.getOrThrow())
+  }
+
+  @Test
+  fun `test load in NonCancellable cancelled by cancelAndJoin`() = runTest {
+    checkLoadInNonCancellableCancelled(replace = false)
+  }
+
+  @Test
+  fun `test load in NonCancellable cancelled by new load`() = runTest {
+    checkLoadInNonCancellableCancelled(replace = true)
+  }
+
+  @Test
   fun `test cancelAndJoin when caller already cancelled and load waiting previous cleanup`() = runTest {
     val loader = FLoader()
     var container = ""
@@ -1829,6 +1864,50 @@ class LoaderTest {
     }
   }
 
+  @Test(timeout = 10_000)
+  fun `test concurrent load on Unconfined dispatcher`() = runTest {
+    withContext(Dispatchers.Unconfined) {
+      repeat(100) {
+        val loader = FLoader()
+        val running = AtomicInteger()
+        val started = AtomicInteger()
+        val overlapped = AtomicBoolean()
+        val causes = ConcurrentLinkedQueue<CancellationException>()
+
+        // Unconfined 下被取消任务的清理会在 load 调用线程上内联执行
+        coroutineScope {
+          List(8) {
+            async {
+              try {
+                loader.load {
+                  if (running.incrementAndGet() != 1) overlapped.set(true)
+                  started.incrementAndGet()
+                  try {
+                    yield()
+                    delay(1)
+                  } finally {
+                    running.decrementAndGet()
+                  }
+                }.getOrThrow()
+              } catch (e: CancellationException) {
+                causes.add(e)
+              }
+            }
+          }.awaitAll()
+        }
+
+        assertEquals(false, overlapped.get())
+        assertEquals(0, running.get())
+        assertEquals(true, started.get() > 0)
+        causes.forEach { cause ->
+          assertTrue("unexpected cause: $cause", cause is FLoader.ReplacedCancellationException)
+        }
+        assertEquals(false, loader.isLoading())
+        assertEquals(1, loader.tryLoad { 1 }.getOrThrow())
+      }
+    }
+  }
+
   @Test
   fun `test cancel when idle`() = runTest {
     val loader = FLoader()
@@ -1888,5 +1967,46 @@ class LoaderTest {
     }.also { result ->
       assertSame(cancellation, result.exceptionOrNull())
     }
+  }
+
+  private suspend fun TestScope.checkLoadInNonCancellableCancelled(replace: Boolean) {
+    val loader = FLoader()
+    val container = mutableListOf<String>()
+    var exceptionInBlock: Throwable? = null
+    var loadException: Throwable? = null
+
+    val job = launch {
+      withContext(NonCancellable) {
+        loadException = runCatching {
+          loader.load {
+            try {
+              delay(Long.MAX_VALUE)
+            } catch (e: CancellationException) {
+              exceptionInBlock = e
+              throw e
+            } finally {
+              container.add("cleaned")
+            }
+          }
+        }.exceptionOrNull()
+      }
+    }.also { runCurrent() }
+    assertEquals(true, loader.isLoading())
+
+    if (replace) {
+      assertEquals(2, loader.load { container.add("new-load"); 2 }.getOrThrow())
+    } else {
+      loader.cancelAndJoin()
+    }
+    job.join()
+
+    // NonCancellable 只阻止调用方取消，加载仍会被 cancelAndJoin 或新的 load 取消
+    val expectedType = if (replace) FLoader.ReplacedCancellationException::class else FLoader.ManualCancellationException::class
+    assertEquals(expectedType, exceptionInBlock!!::class)
+    assertEquals(expectedType, loadException!!::class)
+    assertEquals(false, job.isCancelled)
+    assertEquals(if (replace) listOf("cleaned", "new-load") else listOf("cleaned"), container)
+    assertEquals(false, loader.isLoading())
+    assertEquals(3, loader.tryLoad { 3 }.getOrThrow())
   }
 }
