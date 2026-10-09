@@ -102,12 +102,12 @@
 
 | 测试类 | 覆盖范围 |
 |---|---|
-| `LoaderTest` | 加载结果、取消（含先被替换再被 `cancelAndJoin` 取消时保留替换原因）、排队（含旧任务结束后恢复前被 `cancelAndJoin` 取消）、多线程（含 `onLoad` 抛普通异常）、嵌套（含新根 scope 绕开检测后 `load` 替换外层、`tryLoad` 判忙穿透外层）、Unconfined 下运行中和排队中调用方 `finally` 内联重入（含 `tryLoad` 判忙）、`loadingFlow`（含普通异常、排队加载被替换和 `tryLoad` 被替换）和 `stateFlow` 序列 |
+| `LoaderTest` | 加载结果、取消（含先被替换再被 `cancelAndJoin` 取消时保留替换原因）、排队（含旧任务结束后恢复前被 `cancelAndJoin` 取消）、多线程（含 `onLoad` 抛普通异常）、嵌套（含新根 scope 绕开检测后 `load` 替换外层、`tryLoad` 判忙穿透外层、`cancelAndJoin` 取消外层）、Unconfined 下运行中和排队中调用方 `finally` 内联重入（含 `tryLoad` 判忙）、`loadingFlow`（含普通异常、排队加载被替换和 `tryLoad` 被替换）和 `stateFlow` 序列 |
 | `LoaderCallbackTest` | `load` 与 `tryLoad` 的异常包装、子协程生命周期（含回调抛取消异常时子协程收到同一原因并等待清理，以及子协程内其他 Loader 的忙异常不传播）、线程上下文安装期间的取消、回调内的嵌套调用和 Flow 上下文约束 |
 | `LoaderQueuedCleanupTest` | `load` 与 `tryLoad` 发起的任务在排队调用方取消或超时后仍保持忙状态和清理等待，以及之后的新 `load` 等待清理后执行 |
-| `LoaderReferenceTest` | `load` 与 `tryLoad` 在成功、普通异常和取消异常退出后释放结果及异常数据、成功后释放回调闭包捕获的对象，以及排队加载取消后的异常数据释放 |
+| `LoaderReferenceTest` | `load` 与 `tryLoad` 在成功、普通异常和取消异常退出后释放结果、异常数据及回调闭包捕获的对象，以及排队加载取消后的异常数据释放 |
 | `MutatorTest` | 已取消调用方的任务登记、已登记 `load` 与 `tryLoad` 的取消和替换、上下文探针的暂停位置，新任务登记后尚未发起取消时的排队任务替换、手动取消和忙状态，以及 `cancelAndJoin` 的取消顺序 |
-| `MutexTest` | 互斥、锁释放（含 `action` 抛出取消异常，以及吞掉取消后正常返回时仍抛出）、嵌套（含子协程，以及新根 scope 绕开检测后等待锁）和 Flow 上下文约束 |
+| `MutexTest` | 互斥、锁释放（含 `action` 抛出取消异常，以及吞掉取消后正常返回时仍抛出）、嵌套（含子协程、隔着其他实例回到同一实例，以及新根 scope 绕开检测后等待锁）和 Flow 上下文约束 |
 
 ## 编码与发布约定
 

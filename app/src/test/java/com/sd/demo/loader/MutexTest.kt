@@ -591,6 +591,23 @@ class MutexTest {
     assertEquals(42, result)
   }
 
+  @Test
+  fun `test withLock nested same instance through other instance`() = runTest {
+    val mutexA = FMutex()
+    val mutexB = FMutex()
+    // 隔着另一实例回到同一实例仍会被拦截，两把锁都正常释放
+    val exception = mutexA.withLock {
+      mutexB.withLock {
+        runCatching { mutexA.withLock { } }.exceptionOrNull()
+      }
+    }
+    assertEquals(true, exception is IllegalStateException)
+    assertFalse(exception is CancellationException)
+    assertEquals("Nested invoke", exception?.message)
+    assertEquals(2, mutexA.withLock { 2 })
+    assertEquals(3, mutexB.withLock { 3 })
+  }
+
   @Test(timeout = 10_000)
   fun `test withLock mutually exclusive on multiple threads`() = runTest {
     withContext(Dispatchers.Default) {

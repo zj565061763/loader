@@ -753,6 +753,36 @@ class LoaderTest {
     }
   }
 
+  @Test(timeout = 10_000)
+  fun `test nested cancelAndJoin in new root scope cancels outer load`() = runTest {
+    val loader = FLoader()
+    val container = mutableListOf<String>()
+    // 独立的根 scope 不继承上下文，嵌套检测失效，内层 cancelAndJoin 会取消外层而不是死锁
+    val rootScope = CoroutineScope(StandardTestDispatcher(testScheduler))
+
+    try {
+      val exception = runCatching {
+        loader.load {
+          container.add("outer-started")
+          rootScope.async {
+            loader.cancelAndJoin()
+            container.add("inner-cancel-finished")
+          }.await()
+          container.add("outer-returned")
+        }
+      }.exceptionOrNull()
+      advanceUntilIdle()
+
+      // 外层等待内层时被取消，内层 cancelAndJoin 等外层结束后才返回
+      assertTrue(exception is FLoader.ManualCancellationException)
+      assertEquals(listOf("outer-started", "inner-cancel-finished"), container)
+      assertEquals(false, loader.isLoading())
+      assertEquals(1, loader.tryLoad { 1 }.getOrThrow())
+    } finally {
+      rootScope.cancel()
+    }
+  }
+
   @Test
   fun `test load other loader in block`() = runTest {
     val loader = FLoader()
