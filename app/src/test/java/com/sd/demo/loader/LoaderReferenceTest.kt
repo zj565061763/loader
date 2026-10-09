@@ -1,7 +1,15 @@
 package com.sd.demo.loader
 
 import com.sd.lib.loader.FLoader
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.awaitCancellation
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.withContext
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -41,6 +49,45 @@ class LoaderReferenceTest(private val useTryLoad: Boolean) {
         loadForTest<Any> { throw PayloadCancellationException(Any()) }
       }.exceptionOrNull() as PayloadCancellationException
       cause.payload
+    }
+  }
+
+  @Test(timeout = 10_000)
+  fun `test cancelled queued load releases cancellation payload`() {
+    assertReleased(FLoader()) {
+      coroutineScope {
+        val cleanupStarted = CompletableDeferred<Unit>()
+        val releaseCleanup = CompletableDeferred<Unit>()
+        val first = launch(start = CoroutineStart.UNDISPATCHED) {
+          loadForTest {
+            try {
+              awaitCancellation()
+            } finally {
+              withContext(NonCancellable) {
+                cleanupStarted.complete(Unit)
+                releaseCleanup.await()
+              }
+            }
+          }
+        }
+
+        try {
+          val payload = Any()
+          val queued = launch(start = CoroutineStart.UNDISPATCHED) {
+            load { error("Queued load must not run") }.getOrThrow()
+          }
+          cleanupStarted.await()
+          assertEquals(false, first.isCompleted)
+          assertEquals(false, queued.isCompleted)
+
+          queued.cancel(PayloadCancellationException(payload))
+          queued.join()
+          payload
+        } finally {
+          releaseCleanup.complete(Unit)
+          first.join()
+        }
+      }
     }
   }
 

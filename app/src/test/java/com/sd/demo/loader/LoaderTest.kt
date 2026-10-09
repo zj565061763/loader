@@ -1416,7 +1416,8 @@ class LoaderTest {
     // cancelAndJoin 等待旧任务清理期间发起的 load 不受影响
     loader.load { container += "3" }.getOrThrow()
     cancelJob.join()
-    assertEquals("123", container)
+    // 旧任务必须先清理，取消方和新加载的恢复顺序不限
+    assertTrue("Unexpected order: $container", container == "123" || container == "132")
     assertEquals(false, loader.isLoading())
   }
 
