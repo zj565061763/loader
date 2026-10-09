@@ -15,6 +15,7 @@ import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.currentTime
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
@@ -83,6 +84,16 @@ class MutatorTest {
   }
 
   @Test(timeout = 10_000)
+  fun `test registered tryLoad cancelled before callback`() = runTest {
+    checkRegisteredTryLoadCancellation(replace = false)
+  }
+
+  @Test(timeout = 10_000)
+  fun `test registered tryLoad replaced before callback`() = runTest {
+    checkRegisteredTryLoadCancellation(replace = true)
+  }
+
+  @Test(timeout = 10_000)
   fun `test already cancelled tryLoad does not make idle loader busy`() = runTest {
     Executors.newSingleThreadExecutor().asCoroutineDispatcher().use { callerDispatcher ->
       val loader = FLoader()
@@ -131,6 +142,7 @@ class MutatorTest {
       val queuedEntered = AtomicBoolean()
       val tryEntered = AtomicBoolean()
       val mutator = FMutator(
+        newCancelCause = { FLoader.ManualCancellationException() },
         newReplaceCause = {
           if (replacements.incrementAndGet() == 2) {
             // 暂停最新任务的取消操作，保留旧排队任务恢复执行的窗口
@@ -209,6 +221,7 @@ class MutatorTest {
           check(allowReplacementCancel.await(5, TimeUnit.SECONDS))
           FLoader.ReplacedCancellationException()
         },
+        newBusyCause = { FLoader.BusyCancellationException() },
       )
       var runningCause: CancellationException? = null
       var cancelCause: Throwable? = null
@@ -261,6 +274,67 @@ class MutatorTest {
         releaseCleanup.complete(Unit)
         first.cancelAndJoin()
         latest.cancelAndJoin()
+      }
+    }
+  }
+
+  private suspend fun TestScope.checkRegisteredTryLoadCancellation(replace: Boolean) {
+    Executors.newSingleThreadExecutor().asCoroutineDispatcher().use { callerDispatcher ->
+      val loader = FLoader()
+      val callerPaused = CompletableDeferred<Unit>()
+      val releaseCaller = CountDownLatch(1)
+      val probePaused = AtomicBoolean()
+      val callbackEntered = AtomicBoolean()
+      val replacementEntered = AtomicBoolean()
+      val contextProbe = PauseOnRepeatedContextKey {
+        probePaused.set(true)
+        callerPaused.complete(Unit)
+        check(releaseCaller.await(5, TimeUnit.SECONDS))
+      }
+      val caller = async(callerDispatcher + contextProbe) {
+        contextProbe.arm()
+        try {
+          runCatching { loader.tryLoad { callbackEntered.set(true) } }.exceptionOrNull()
+        } finally {
+          callerPaused.complete(Unit)
+        }
+      }
+
+      try {
+        callerPaused.await()
+        assertEquals(true, probePaused.get())
+        assertEquals(false, callbackEntered.get())
+        assertEquals(false, loader.isLoading())
+
+        val next = async {
+          if (replace) {
+            loader.load {
+              replacementEntered.set(true)
+              2
+            }.getOrThrow()
+          } else {
+            loader.cancelAndJoin()
+            2
+          }
+        }.also { runCurrent() }
+
+        assertEquals(false, caller.isCompleted)
+        assertEquals(false, next.isCompleted)
+        assertEquals(false, callbackEntered.get())
+        assertEquals(false, replacementEntered.get())
+        assertTrue(runCatching { loader.tryLoad { 3 } }.exceptionOrNull() is FLoader.BusyCancellationException)
+
+        releaseCaller.countDown()
+        val cause = caller.await()
+        assertTrue(if (replace) cause is FLoader.ReplacedCancellationException else cause is FLoader.ManualCancellationException)
+        assertEquals(2, next.await())
+        assertEquals(false, callbackEntered.get())
+        assertEquals(replace, replacementEntered.get())
+        assertEquals(false, loader.isLoading())
+        assertEquals(3, loader.tryLoad { 3 }.getOrThrow())
+      } finally {
+        releaseCaller.countDown()
+        caller.cancelAndJoin()
       }
     }
   }

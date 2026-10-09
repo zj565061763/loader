@@ -148,7 +148,11 @@ class LoaderTest {
     loader.load { }.getOrThrow()
     // onLoad 和调用方都收到 ReplacedCancellationException
     assertEquals(true, exceptionInBlock is FLoader.ReplacedCancellationException)
-    assertEquals(true, job.await() is FLoader.ReplacedCancellationException)
+    assertEquals("Cancelled by new load", exceptionInBlock?.message)
+    job.await().also { cause ->
+      assertEquals(true, cause is FLoader.ReplacedCancellationException)
+      assertEquals("Cancelled by new load", cause?.message)
+    }
   }
 
   @Test
@@ -174,7 +178,11 @@ class LoaderTest {
     loader.cancelAndJoin()
     // onLoad 和调用方都收到 ManualCancellationException
     assertEquals(true, exceptionInBlock is FLoader.ManualCancellationException)
-    assertEquals(true, job.await() is FLoader.ManualCancellationException)
+    assertEquals("Cancelled by cancelAndJoin", exceptionInBlock?.message)
+    job.await().also { cause ->
+      assertEquals(true, cause is FLoader.ManualCancellationException)
+      assertEquals("Cancelled by cancelAndJoin", cause?.message)
+    }
   }
 
   @Test
@@ -473,6 +481,24 @@ class LoaderTest {
   }
 
   @Test
+  fun `test nested load across dispatchers`() = runTest {
+    val loader = FLoader()
+    var nestedEntered = false
+
+    val result = loader.load {
+      withContext(Dispatchers.Default) {
+        loader.load { nestedEntered = true }.getOrThrow()
+      }
+    }
+
+    assertTrue(result.exceptionOrNull() is IllegalStateException)
+    assertEquals("Nested invoke", result.exceptionOrNull()?.message)
+    assertEquals(false, nestedEntered)
+    assertEquals(false, loader.isLoading())
+    assertEquals(1, loader.tryLoad { 1 }.getOrThrow())
+  }
+
+  @Test
   fun `test nested tryLoad`() = runTest {
     val loader = FLoader()
 
@@ -527,6 +553,60 @@ class LoaderTest {
       otherLoader.load { 1 }
     }.also { result ->
       assertEquals(1, result.getOrThrow().getOrThrow())
+    }
+  }
+
+  @Test
+  fun `test cancelAndJoin other loader in block waits for cleanup`() = runTest {
+    val loader = FLoader()
+    val otherLoader = FLoader()
+    val cleanupStarted = CompletableDeferred<Unit>()
+    val releaseCleanup = CompletableDeferred<Unit>()
+    val container = mutableListOf<String>()
+    val otherJob = async {
+      runCatching {
+        otherLoader.load {
+          try {
+            delay(Long.MAX_VALUE)
+          } finally {
+            withContext(NonCancellable) {
+              cleanupStarted.complete(Unit)
+              releaseCleanup.await()
+            }
+            container.add("other-cleaned")
+          }
+        }
+      }.exceptionOrNull()
+    }.also { runCurrent() }
+
+    try {
+      val loading = async {
+        loader.load {
+          container.add("outer-started")
+          otherLoader.cancelAndJoin()
+          container.add("outer-resumed")
+          2
+        }
+      }.also { runCurrent() }
+
+      assertEquals(true, cleanupStarted.isCompleted)
+      assertEquals(false, otherJob.isCompleted)
+      assertEquals(false, loading.isCompleted)
+      assertEquals(true, otherLoader.isLoading())
+      assertEquals(true, loader.isLoading())
+      assertEquals(listOf("outer-started"), container)
+
+      releaseCleanup.complete(Unit)
+      assertEquals(2, loading.await().getOrThrow())
+      assertTrue(otherJob.await() is FLoader.ManualCancellationException)
+      assertEquals(listOf("outer-started", "other-cleaned", "outer-resumed"), container)
+      assertEquals(false, otherLoader.isLoading())
+      assertEquals(false, loader.isLoading())
+      assertEquals(3, otherLoader.tryLoad { 3 }.getOrThrow())
+      assertEquals(4, loader.tryLoad { 4 }.getOrThrow())
+    } finally {
+      releaseCleanup.complete(Unit)
+      otherJob.cancelAndJoin()
     }
   }
 
@@ -1178,6 +1258,90 @@ class LoaderTest {
   }
 
   @Test
+  fun `test concurrent cancelAndJoin and tryLoad when busy`() = runTest {
+    withContext(Dispatchers.Default) {
+      repeat(100) {
+        val loader = FLoader()
+        val started = CompletableDeferred<Unit>()
+        val cleanupStarted = CompletableDeferred<Unit>()
+        val releaseCleanup = CompletableDeferred<Unit>()
+        val running = AtomicInteger()
+        val overlapped = AtomicBoolean()
+        val first = async {
+          runCatching {
+            loader.load {
+              running.incrementAndGet()
+              started.complete(Unit)
+              try {
+                delay(Long.MAX_VALUE)
+              } finally {
+                try {
+                  withContext(NonCancellable) {
+                    cleanupStarted.complete(Unit)
+                    releaseCleanup.await()
+                  }
+                } finally {
+                  running.decrementAndGet()
+                }
+              }
+            }.getOrThrow()
+          }.exceptionOrNull()
+        }
+
+        try {
+          started.await()
+          coroutineScope {
+            val start = CompletableDeferred<Unit>()
+            val cancelJobs = List(8) {
+              async {
+                start.await()
+                loader.cancelAndJoin()
+              }
+            }
+            val tryLoadJobs = List(16) {
+              async {
+                start.await()
+                runCatching {
+                  loader.tryLoad {
+                    if (running.incrementAndGet() != 1) overlapped.set(true)
+                    try {
+                      yield()
+                      1
+                    } finally {
+                      running.decrementAndGet()
+                    }
+                  }.getOrThrow()
+                }.exceptionOrNull()
+              }
+            }
+            val cleanup = launch {
+              start.await()
+              cleanupStarted.await()
+              releaseCleanup.complete(Unit)
+            }
+
+            start.complete(Unit)
+            tryLoadJobs.awaitAll().forEach { cause ->
+              val expected = cause == null || cause is FLoader.BusyCancellationException || cause is FLoader.ManualCancellationException
+              assertTrue("unexpected cause: $cause", expected)
+            }
+            cancelJobs.awaitAll()
+            cleanup.join()
+          }
+
+          assertTrue(first.await() is FLoader.ManualCancellationException)
+          assertEquals(false, overlapped.get())
+          assertEquals(0, running.get())
+          assertEquals(false, loader.isLoading())
+          assertEquals(2, loader.tryLoad { 2 }.getOrThrow())
+        } finally {
+          releaseCleanup.complete(Unit)
+        }
+      }
+    }
+  }
+
+  @Test
   fun `test cancelAndJoin when caller cancelled while waiting cleanup`() = runTest {
     val loader = FLoader()
     val cause = CustomCancellationException()
@@ -1673,6 +1837,23 @@ class LoaderTest {
     loader.load { 1 }.also { result ->
       assertEquals(1, result.getOrThrow())
     }
+  }
+
+  @Test
+  fun `test cancelAndJoin returns when caller already cancelled and loader idle`() = runTest {
+    val loader = FLoader()
+    var returned = false
+    val caller = launch {
+      currentCoroutineContext().cancel()
+      loader.cancelAndJoin()
+      returned = true
+    }
+    caller.join()
+
+    assertEquals(true, caller.isCancelled)
+    assertEquals(true, returned)
+    assertEquals(false, loader.isLoading())
+    assertEquals(1, loader.tryLoad { 1 }.getOrThrow())
   }
 
   @Test

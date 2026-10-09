@@ -62,6 +62,7 @@
 
 ### `FMutator`
 
+- 取消、替换和忙状态的异常工厂必须显式传入，不提供默认值
 - `_job` 是最近进入的任务，可能还在等待；`_runningJob` 是已开始执行 block 且尚未结束的任务，任何时刻最多一个
 - 两个字段只在 `_lock` 内读写；锁内不能挂起，`cancel`、`join` 都放在锁外
 - `mutate` 进入时在锁内把自己设为 `_job`，锁外取消上一个 `_job`，再等待进入时读到的 `_runningJob` 结束
@@ -97,11 +98,11 @@
 
 | 测试类 | 覆盖范围 |
 |---|---|
-| `LoaderTest` | 加载结果、取消、排队、多线程和状态流 |
+| `LoaderTest` | 加载结果、取消、排队、多线程、嵌套和状态流 |
 | `LoaderCallbackTest` | `load` 与 `tryLoad` 的异常包装、子协程生命周期、线程上下文安装期间的取消和 Flow 上下文约束 |
-| `LoaderQueuedCleanupTest` | `load` 与 `tryLoad` 发起的任务在排队调用方取消后仍保持忙状态和清理等待 |
+| `LoaderQueuedCleanupTest` | `load` 与 `tryLoad` 发起的任务在排队调用方取消或超时后仍保持忙状态和清理等待 |
 | `LoaderReferenceTest` | `load` 与 `tryLoad` 在成功、普通异常和取消异常退出后释放结果及异常数据，以及排队加载取消后的异常数据释放 |
-| `MutatorTest` | 已取消调用方的任务登记、上下文探针的暂停位置，以及新任务登记后尚未发起取消时的排队任务替换、手动取消和忙状态 |
+| `MutatorTest` | 已取消调用方的任务登记、已登记 `tryLoad` 的取消和替换、上下文探针的暂停位置，以及新任务登记后尚未发起取消时的排队任务替换、手动取消和忙状态 |
 | `MutexTest` | 互斥、锁释放、嵌套和 Flow 上下文约束 |
 
 ## 编码与发布约定

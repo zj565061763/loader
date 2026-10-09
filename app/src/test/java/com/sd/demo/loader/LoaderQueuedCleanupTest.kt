@@ -1,18 +1,26 @@
 package com.sd.demo.loader
 
+import app.cash.turbine.test
 import com.sd.lib.loader.FLoader
+import com.sd.lib.loader.loadingFlow
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.TimeoutCancellationException
+import kotlinx.coroutines.async
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.advanceUntilIdle
+import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.currentTime
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeout
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertSame
+import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.junit.runners.Parameterized
@@ -77,6 +85,77 @@ class LoaderQueuedCleanupTest(private val useTryLoad: Boolean) {
     assertEquals(false, loader.isLoading())
     loader.tryLoad { container += "3" }.getOrThrow()
     assertEquals("13", container)
+  }
+
+  @Test
+  fun `test queued load timeout leaves previous cleanup running`() = runTest {
+    val loader = FLoader()
+    val cleanupStarted = CompletableDeferred<Unit>()
+    val releaseCleanup = CompletableDeferred<Unit>()
+    val container = mutableListOf<String>()
+    var queuedCause: Throwable? = null
+
+    loader.loadingFlow.test {
+      assertEquals(false, awaitItem())
+      val loading = launch {
+        loader.loadForTest {
+          try {
+            delay(Long.MAX_VALUE)
+          } finally {
+            withContext(NonCancellable) {
+              cleanupStarted.complete(Unit)
+              releaseCleanup.await()
+            }
+            container.add("old-cleaned")
+          }
+        }
+      }.also { runCurrent() }
+
+      try {
+        assertEquals(true, awaitItem())
+        val queued = async {
+          runCatching {
+            withTimeout(100) {
+              try {
+                loader.load { container.add("queued-load") }
+              } catch (e: CancellationException) {
+                queuedCause = e
+                throw e
+              }
+            }
+          }.exceptionOrNull()
+        }.also { runCurrent() }
+        assertEquals(true, cleanupStarted.isCompleted)
+        assertEquals(false, queued.isCompleted)
+        val startTime = currentTime
+
+        advanceTimeBy(100)
+        runCurrent()
+
+        assertEquals(true, queued.isCompleted)
+        assertTrue(queuedCause is TimeoutCancellationException)
+        assertTrue(queued.await() is TimeoutCancellationException)
+        assertEquals(false, loading.isCompleted)
+        assertEquals(true, loader.isLoading())
+        assertEquals(emptyList<String>(), container)
+        assertEquals(startTime + 100, currentTime)
+        assertTrue(runCatching { loader.tryLoad { container.add("try-load") } }.exceptionOrNull() is FLoader.BusyCancellationException)
+        assertEquals(emptyList<String>(), container)
+        assertEquals(startTime + 100, currentTime)
+        expectNoEvents()
+
+        releaseCleanup.complete(Unit)
+        loading.join()
+        assertEquals(listOf("old-cleaned"), container)
+        assertEquals(false, awaitItem())
+        assertEquals(false, loader.isLoading())
+      } finally {
+        releaseCleanup.complete(Unit)
+        loading.cancelAndJoin()
+      }
+    }
+
+    assertEquals(3, loader.tryLoad { 3 }.getOrThrow())
   }
 
   @Test
