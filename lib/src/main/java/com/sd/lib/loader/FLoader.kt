@@ -35,6 +35,7 @@ interface FLoader {
    * 被新的[load]取消时抛出[ReplacedCancellationException]，
    * 被调用方取消时抛出调用方的取消原因，都不会返回[Result]。
    * 例如外层 Loader 被[cancelAndJoin]取消时，在其加载回调中调用的[load]抛出的也是[ManualCancellationException]。
+   * 加载被多次取消时只保留最先的取消原因，例如先被新的[load]替换再被[cancelAndJoin]取消时抛出的仍是[ReplacedCancellationException]。
    * 在[NonCancellable]中调用时只是不会被调用方取消，仍会被[cancelAndJoin]或新的[load]取消。
    *
    * [onLoad]内收到的取消异常也是这些类型。
@@ -58,6 +59,7 @@ interface FLoader {
    *
    * [BusyCancellationException]是[CancellationException]的子类，不捕获会取消调用方协程。
    * 在加载回调中调用其他 Loader 的[tryLoad]时，后者抛出的忙异常也会向外传播。
+   * 在回调内启动的子协程中调用时，忙异常按子协程取消处理，不会传播到当前加载。
    */
   suspend fun <T> tryLoad(onLoad: suspend () -> T): Result<T>
 

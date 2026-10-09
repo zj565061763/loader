@@ -100,6 +100,31 @@ class LoaderCallbackTest(private val useTryLoad: Boolean) {
   }
 
   @Test
+  fun `test busy from other loader in child coroutine is swallowed`() = runTest {
+    val loader = FLoader()
+    val otherLoader = FLoader()
+    var childCause: Throwable? = null
+    val otherJob = launch { otherLoader.load { delay(Long.MAX_VALUE) } }.also { runCurrent() }
+
+    val result = loader.loadForTest {
+      CoroutineScope(currentCoroutineContext()).launch {
+        otherLoader.tryLoad { }
+      }.invokeOnCompletion { childCause = it }
+      1
+    }
+
+    // 子协程内的忙异常按子协程取消处理，不会传播到当前加载
+    assertTrue(childCause is FLoader.BusyCancellationException)
+    assertEquals(1, result.getOrThrow())
+    assertEquals(false, loader.isLoading())
+    assertEquals(true, otherLoader.isLoading())
+    assertEquals(false, otherJob.isCancelled)
+
+    otherJob.cancelAndJoin()
+    assertEquals(2, loader.tryLoad { 2 }.getOrThrow())
+  }
+
+  @Test
   fun `test load waits for child success`() = runTest {
     val loader = FLoader()
     val releaseChild = CompletableDeferred<Unit>()

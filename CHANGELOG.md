@@ -13,6 +13,8 @@
 - **补充 `tryLoad` 繁忙判定的说明**：上一次加载取消后仍在清理时也算繁忙。
 - **修正 `tryLoad` 的说明**：`tryLoad` 不取消也不等待上一次加载，繁忙时立即抛出 `BusyCancellationException`，其余行为与 `load` 相同。
 - **补充嵌套检测失效的场景**：除 `runBlocking` 和新线程外，通过新的根协程作用域绕开原上下文时同样无法检测嵌套调用，可能导致死锁。
+- **补充多次取消时的异常说明**：加载被多次取消时只保留最先的取消原因，先被新的 `load` 替换再被 `cancelAndJoin()` 取消时抛出的仍是 `ReplacedCancellationException`。
+- **补充子协程内忙异常的说明**：在 `onLoad` 内启动的子协程中调用其他 Loader 的 `tryLoad`，忙异常按子协程取消处理，不会传播到当前加载。
 
 ## 1.9.0
 

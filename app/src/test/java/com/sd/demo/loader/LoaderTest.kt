@@ -216,6 +216,48 @@ class LoaderTest {
   }
 
   @Test
+  fun `test load when cancelled by cancelAndJoin after replaced`() = runTest {
+    val loader = FLoader()
+    val releaseCleanup = CompletableDeferred<Unit>()
+    var exceptionInBlock: Throwable? = null
+    val firstJob = async {
+      runCatching {
+        loader.load {
+          try {
+            delay(Long.MAX_VALUE)
+          } catch (e: CancellationException) {
+            exceptionInBlock = e
+            throw e
+          } finally {
+            withContext(NonCancellable) { releaseCleanup.await() }
+          }
+        }
+      }.exceptionOrNull()
+    }.also { runCurrent() }
+
+    try {
+      val queuedJob = async {
+        runCatching { loader.load { 2 } }.exceptionOrNull()
+      }.also { runCurrent() }
+      assertTrue(exceptionInBlock is FLoader.ReplacedCancellationException)
+
+      val cancelJob = launch { loader.cancelAndJoin() }.also { runCurrent() }
+      assertTrue(queuedJob.await() is FLoader.ManualCancellationException)
+      assertEquals(false, firstJob.isCompleted)
+
+      releaseCleanup.complete(Unit)
+      cancelJob.join()
+      // 先被替换再被 cancelAndJoin 取消的加载保留最先的取消原因
+      assertTrue(exceptionInBlock is FLoader.ReplacedCancellationException)
+      assertTrue(firstJob.await() is FLoader.ReplacedCancellationException)
+      assertEquals(false, loader.isLoading())
+      assertEquals(3, loader.tryLoad { 3 }.getOrThrow())
+    } finally {
+      releaseCleanup.complete(Unit)
+    }
+  }
+
+  @Test
   fun `test load when cancel`() = runTest {
     val loader = FLoader()
     var container = ""
