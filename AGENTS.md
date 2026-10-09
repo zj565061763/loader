@@ -66,6 +66,7 @@
 - `_job` 是最近进入的任务，可能还在等待；`_runningJob` 是已开始执行 block 且尚未结束的任务，任何时刻最多一个
 - 两个字段只在 `_lock` 内读写；锁内不能挂起，`cancel`、`join` 都放在锁外
 - `mutate` 进入时在锁内把自己设为 `_job`，锁外取消上一个 `_job`，再等待进入时读到的 `_runningJob` 结束
+- `mutate` 不直接取消 `_runningJob`，依赖链式取消：每个成为 `_job` 的任务都会同步取消它读到的上一个 `_job`，一直传递到 `_runningJob`；`prevJob?.cancel` 必须紧跟登记且中间不能有挂起点，否则排队任务被调用方取消后 `_runningJob` 可能无人取消
 - 只有仍是 `_job` 的任务才能开始执行，并在同一次加锁中设为 `_runningJob`；否则说明有更新的任务进入，以 `newReplaceCause()` 取消自己。这条保证串行执行，不能去掉
 - 排队任务被取消后可能先于 `_runningJob` 结束，所以判断忙和等待时必须同时看两个字段，不能只看 `_job`
 - `mutateOrThrow` 进入时先检查 `ensureActive` 再登记任务，避免已取消的调用方让空闲的 Loader 短暂变忙
@@ -99,11 +100,11 @@
 
 | 测试类 | 覆盖范围 |
 |---|---|
-| `LoaderTest` | 加载结果、取消、排队、多线程、嵌套和状态流 |
+| `LoaderTest` | 加载结果、取消、排队、多线程、嵌套、Unconfined 下调用方 `finally` 内联重入和状态流 |
 | `LoaderCallbackTest` | `load` 与 `tryLoad` 的异常包装、子协程生命周期、线程上下文安装期间的取消、回调内的嵌套调用和 Flow 上下文约束 |
 | `LoaderQueuedCleanupTest` | `load` 与 `tryLoad` 发起的任务在排队调用方取消或超时后仍保持忙状态和清理等待 |
 | `LoaderReferenceTest` | `load` 与 `tryLoad` 在成功、普通异常和取消异常退出后释放结果及异常数据，以及排队加载取消后的异常数据释放 |
-| `MutatorTest` | 已取消调用方的任务登记、已登记 `tryLoad` 的取消和替换、上下文探针的暂停位置，新任务登记后尚未发起取消时的排队任务替换、手动取消和忙状态，以及 `cancelAndJoin` 的取消顺序 |
+| `MutatorTest` | 已取消调用方的任务登记、已登记 `load` 与 `tryLoad` 的取消和替换、上下文探针的暂停位置，新任务登记后尚未发起取消时的排队任务替换、手动取消和忙状态，以及 `cancelAndJoin` 的取消顺序 |
 | `MutexTest` | 互斥、锁释放、嵌套（含子协程）和 Flow 上下文约束 |
 
 ## 编码与发布约定

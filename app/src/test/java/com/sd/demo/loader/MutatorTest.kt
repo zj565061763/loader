@@ -87,12 +87,22 @@ class MutatorTest {
 
   @Test(timeout = 10_000)
   fun `test registered tryLoad cancelled before callback`() = runTest {
-    checkRegisteredTryLoadCancellation(replace = false)
+    checkRegisteredTaskCancellation(useTryLoad = true, replace = false)
   }
 
   @Test(timeout = 10_000)
   fun `test registered tryLoad replaced before callback`() = runTest {
-    checkRegisteredTryLoadCancellation(replace = true)
+    checkRegisteredTaskCancellation(useTryLoad = true, replace = true)
+  }
+
+  @Test(timeout = 10_000)
+  fun `test registered load cancelled before callback`() = runTest {
+    checkRegisteredTaskCancellation(useTryLoad = false, replace = false)
+  }
+
+  @Test(timeout = 10_000)
+  fun `test registered load replaced before callback`() = runTest {
+    checkRegisteredTaskCancellation(useTryLoad = false, replace = true)
   }
 
   @Test(timeout = 10_000)
@@ -331,7 +341,8 @@ class MutatorTest {
     }
   }
 
-  private suspend fun TestScope.checkRegisteredTryLoadCancellation(replace: Boolean) {
+  // 任务已登记为运行任务但尚未进入回调时被取消或替换，load 与 tryLoad 的登记路径不同，需分别覆盖
+  private suspend fun TestScope.checkRegisteredTaskCancellation(useTryLoad: Boolean, replace: Boolean) {
     Executors.newSingleThreadExecutor().asCoroutineDispatcher().use { callerDispatcher ->
       val loader = FLoader()
       val callerPaused = CompletableDeferred<Unit>()
@@ -347,7 +358,9 @@ class MutatorTest {
       val caller = async(callerDispatcher + contextProbe) {
         contextProbe.arm()
         try {
-          runCatching { loader.tryLoad { callbackEntered.set(true) } }.exceptionOrNull()
+          runCatching {
+            if (useTryLoad) loader.tryLoad { callbackEntered.set(true) } else loader.load { callbackEntered.set(true) }
+          }.exceptionOrNull()
         } finally {
           callerPaused.complete(Unit)
         }
