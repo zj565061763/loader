@@ -2406,6 +2406,55 @@ class LoaderTest {
   }
 
   @Test(timeout = 10_000)
+  fun `test load from cancelled caller finally on Unconfined`() = runTest {
+    val loader = FLoader()
+    val container = mutableListOf<String>()
+    val firstJob = launch(Dispatchers.Unconfined) {
+      try {
+        loader.load { delay(Long.MAX_VALUE) }
+      } finally {
+        // 旧任务在 cancelAndJoin 的取消调用内联结束并清空登记，这里发起的 load 立即执行，不受该 cancelAndJoin 影响
+        loader.load { container.add("finally-load") }.getOrThrow()
+      }
+    }.also { runCurrent() }
+
+    loader.cancelAndJoin()
+    container.add("cancel-finished")
+    assertEquals(true, firstJob.isCompleted)
+    assertEquals(listOf("finally-load", "cancel-finished"), container)
+    assertEquals(false, loader.isLoading())
+    assertEquals(1, loader.tryLoad { 1 }.getOrThrow())
+  }
+
+  @Test(timeout = 10_000)
+  fun `test tryLoad from cancelled caller finally on Unconfined`() = runTest {
+    val loader = FLoader()
+    val container = mutableListOf<String>()
+    var tryLoadResult: Result<Int>? = null
+    val firstJob = launch(Dispatchers.Unconfined) {
+      try {
+        loader.load { delay(Long.MAX_VALUE) }
+      } finally {
+        // 与被替换时不同，旧任务在 cancelAndJoin 的取消调用内联结束后 Loader 已空闲，tryLoad 不会判忙
+        tryLoadResult = runCatching {
+          loader.tryLoad {
+            container.add("finally-tryLoad")
+            2
+          }.getOrThrow()
+        }
+      }
+    }.also { runCurrent() }
+
+    loader.cancelAndJoin()
+    container.add("cancel-finished")
+    assertEquals(2, tryLoadResult?.getOrThrow())
+    assertEquals(true, firstJob.isCompleted)
+    assertEquals(listOf("finally-tryLoad", "cancel-finished"), container)
+    assertEquals(false, loader.isLoading())
+    assertEquals(1, loader.tryLoad { 1 }.getOrThrow())
+  }
+
+  @Test(timeout = 10_000)
   fun `test load from replaced queued caller finally on Unconfined`() = runTest {
     val loader = FLoader()
     val container = mutableListOf<String>()
@@ -2591,10 +2640,11 @@ class LoaderTest {
     }
     job.join()
 
-    // 内层 Loader 被别处取消时，外层 load 原样抛出内层的取消异常，而不是返回 Result.failure
+    // 内层 Loader 被别处取消时，外层 load 原样抛出内层的取消异常，而不是返回 Result.failure；调用方协程本身不会被取消
     val expectedType = if (replace) FLoader.ReplacedCancellationException::class else FLoader.ManualCancellationException::class
     assertEquals(expectedType, exceptionInBlock!!::class)
     assertEquals(expectedType, loadException!!::class)
+    assertEquals(false, job.isCancelled)
     assertEquals(false, loader.isLoading())
     assertEquals(false, otherLoader.isLoading())
     assertEquals(3, loader.tryLoad { 3 }.getOrThrow())
