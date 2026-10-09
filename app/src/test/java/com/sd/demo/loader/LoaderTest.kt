@@ -500,6 +500,19 @@ class LoaderTest {
   }
 
   @Test
+  fun `test loadingFlow when error in block`() = runTest {
+    val loader = FLoader()
+    val cause = BusinessException(5)
+    loader.loadingFlow.test {
+      assertSame(cause, loader.load { throw cause }.exceptionOrNull())
+      // 普通异常包装为 Result.failure 后状态序列与成功时一致
+      assertEquals(false, awaitItem())
+      assertEquals(true, awaitItem())
+      assertEquals(false, awaitItem())
+    }
+  }
+
+  @Test
   fun `test loadingFlow when Reload`() = runTest {
     val loader = FLoader()
     loader.loadingFlow.test {

@@ -35,6 +35,15 @@ class LoaderReferenceTest(private val useTryLoad: Boolean) {
   }
 
   @Test(timeout = 10_000)
+  fun `test successful load releases callback capture`() {
+    assertReleased(FLoader()) {
+      val capture = Any()
+      loadForTest { capture.hashCode() }.getOrThrow()
+      capture
+    }
+  }
+
+  @Test(timeout = 10_000)
   fun `test failed load releases exception payload`() {
     assertReleased(FLoader()) {
       val cause = loadForTest<Any> { throw PayloadException(Any()) }.exceptionOrNull() as PayloadException

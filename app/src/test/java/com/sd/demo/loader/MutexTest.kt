@@ -366,6 +366,37 @@ class MutexTest {
   }
 
   @Test
+  fun `test withLock when action swallows cancellation`() = runTest {
+    val mutex = FMutex()
+    val cause = CustomCancellationException(4)
+    var returned = false
+    var thrown: Throwable? = null
+
+    val job = launch {
+      thrown = runCatching {
+        mutex.withLock {
+          try {
+            delay(Long.MAX_VALUE)
+          } catch (_: CancellationException) {
+            // 吞掉取消并正常返回
+          }
+          returned = true
+          1
+        }
+      }.exceptionOrNull()
+    }.also { runCurrent() }
+
+    job.cancel(cause)
+    runCurrent()
+
+    // action 吞掉取消后正常返回，withLock 仍抛出取消异常而不是返回值，锁也已释放
+    assertEquals(true, returned)
+    assertSame(cause, thrown)
+    assertEquals(true, job.isCancelled)
+    assertEquals(2, mutex.withLock { 2 })
+  }
+
+  @Test
   fun `test withLock when cancel waiter`() = runTest {
     val mutex = FMutex()
     val release = CompletableDeferred<Unit>()
