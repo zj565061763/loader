@@ -566,6 +566,36 @@ class LoaderTest {
   }
 
   @Test
+  fun `test loadingFlow when queued load replaced`() = runTest {
+    val loader = FLoader()
+    val container = mutableListOf<String>()
+    loader.loadingFlow.test {
+      launch {
+        loader.load {
+          try {
+            delay(Long.MAX_VALUE)
+          } finally {
+            withContext(NonCancellable) { delay(1000) }
+          }
+        }
+      }.also { runCurrent() }
+      val queued = async {
+        runCatching { loader.load { container.add("queued") } }.exceptionOrNull()
+      }.also { runCurrent() }
+      loader.load { container.add("latest") }.getOrThrow()
+      assertTrue(queued.await() is FLoader.ReplacedCancellationException)
+
+      // 被替换的排队加载不执行，状态流中没有它的翻转
+      assertEquals(false, awaitItem())
+      assertEquals(true, awaitItem())
+      assertEquals(false, awaitItem())
+      assertEquals(true, awaitItem())
+      assertEquals(false, awaitItem())
+      assertEquals(listOf("latest"), container)
+    }
+  }
+
+  @Test
   fun `test tryLoad`() = runTest {
     val loader = FLoader()
 
@@ -690,6 +720,32 @@ class LoaderTest {
 
       assertTrue(exception is FLoader.ReplacedCancellationException)
       assertEquals(listOf("outer-started", "inner-load"), container)
+      assertEquals(false, loader.isLoading())
+      assertEquals(1, loader.tryLoad { 1 }.getOrThrow())
+    } finally {
+      rootScope.cancel()
+    }
+  }
+
+  @Test(timeout = 10_000)
+  fun `test nested tryLoad in new root scope throws busy from outer load`() = runTest {
+    val loader = FLoader()
+    val container = mutableListOf<String>()
+    // 独立的根 scope 不继承上下文，嵌套检测失效，内层 tryLoad 立即判忙而不是死锁
+    val rootScope = CoroutineScope(StandardTestDispatcher(testScheduler))
+
+    try {
+      val exception = runCatching {
+        loader.load {
+          container.add("outer-started")
+          rootScope.async { loader.tryLoad { container.add("inner-load") }.getOrThrow() }.await()
+          container.add("outer-returned")
+        }
+      }.exceptionOrNull()
+
+      // 忙异常是取消异常，从外层 onLoad 穿透后由外层 load 原样抛出
+      assertTrue(exception is FLoader.BusyCancellationException)
+      assertEquals(listOf("outer-started"), container)
       assertEquals(false, loader.isLoading())
       assertEquals(1, loader.tryLoad { 1 }.getOrThrow())
     } finally {
