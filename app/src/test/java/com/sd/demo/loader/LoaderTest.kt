@@ -1994,7 +1994,10 @@ class LoaderTest {
     assertEquals(true, loader.isLoading())
 
     if (replace) {
-      assertEquals(2, loader.load { container.add("new-load"); 2 }.getOrThrow())
+      loader.load {
+        container.add("new-load")
+        2
+      }.also { assertEquals(2, it.getOrThrow()) }
     } else {
       loader.cancelAndJoin()
     }
