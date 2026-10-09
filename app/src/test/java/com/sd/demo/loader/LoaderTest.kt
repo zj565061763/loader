@@ -1521,7 +1521,7 @@ class LoaderTest {
             launch {
               start.await()
               try {
-                if (index % 3 == 0) loader.tryLoad(onLoad) else loader.load(onLoad)
+                (if (index % 3 == 0) loader.tryLoad(onLoad) else loader.load(onLoad)).getOrThrow()
               } catch (e: CancellationException) {
                 causes.add(e)
               }

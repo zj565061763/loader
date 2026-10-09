@@ -4,9 +4,12 @@ import com.sd.lib.loader.FLoader
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.awaitCancellation
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.runTest
@@ -155,6 +158,64 @@ class LoaderReferenceTest(private val useTryLoad: Boolean) {
     checkCancelledQueuedLoadReleasesCapture { _, queued ->
       queued.cancel(PayloadCancellationException(Any()))
       queued.join()
+    }
+  }
+
+  @Test(timeout = 10_000)
+  fun `test cancelled queued load releases callback capture during previous cleanup`() {
+    checkCancelledQueuedLoadReleasesReferenceDuringCleanup(captureCallback = true)
+  }
+
+  @Test(timeout = 10_000)
+  fun `test cancelled queued load releases cancellation payload during previous cleanup`() {
+    checkCancelledQueuedLoadReleasesReferenceDuringCleanup(captureCallback = false)
+  }
+
+  private fun checkCancelledQueuedLoadReleasesReferenceDuringCleanup(captureCallback: Boolean) {
+    val loader = FLoader()
+    val scopeJob = SupervisorJob()
+    // 独立根 scope 让旧任务在 runTest 退出后的 GC 检查期间继续等待清理
+    val scope = CoroutineScope(scopeJob + Dispatchers.Unconfined)
+    val cleanupStarted = CompletableDeferred<Unit>()
+    val releaseCleanup = CompletableDeferred<Unit>()
+    val first = scope.launch(start = CoroutineStart.UNDISPATCHED) {
+      loader.loadForTest {
+        try {
+          awaitCancellation()
+        } finally {
+          withContext(NonCancellable) {
+            cleanupStarted.complete(Unit)
+            releaseCleanup.await()
+          }
+        }
+      }.getOrThrow()
+    }
+
+    try {
+      assertReleased(loader) {
+        val payload = Any()
+        // 分别验证回调捕获和取消原因持有的对象，避免两条引用路径混在一起
+        val onLoad: suspend () -> Int = if (captureCallback) {
+          { payload.hashCode() }
+        } else {
+          { error("Queued load must not run") }
+        }
+        val queued = scope.launch(start = CoroutineStart.UNDISPATCHED) { load(onLoad).getOrThrow() }
+        assertEquals(true, cleanupStarted.isCompleted)
+        assertEquals(false, queued.isCompleted)
+
+        queued.cancel(PayloadCancellationException(if (captureCallback) Any() else payload))
+        queued.join()
+        assertEquals(true, queued.isCompleted)
+        assertEquals(false, first.isCompleted)
+        assertEquals(true, isLoading())
+        payload
+      }
+      assertEquals(false, first.isCompleted)
+      assertEquals(true, loader.isLoading())
+    } finally {
+      releaseCleanup.complete(Unit)
+      runTest { scopeJob.cancelAndJoin() }
     }
   }
 
