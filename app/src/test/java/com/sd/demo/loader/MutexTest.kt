@@ -8,6 +8,7 @@ import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.asCoroutineDispatcher
@@ -500,6 +501,37 @@ class MutexTest {
       assertEquals(2, mutex.withLock { 2 })
     } finally {
       rootScope.cancel()
+    }
+  }
+
+  @Test
+  fun `test withLock nested from detached coroutine with inherited context after lock released`() = runTest {
+    val mutex = FMutex()
+    val release = CompletableDeferred<Unit>()
+    val detachedJob = Job()
+    var exception: Throwable? = null
+
+    try {
+      val result = mutex.withLock {
+        // 继承当前上下文但换成独立 Job 的协程不挂在持锁协程上，却带着嵌套标记
+        CoroutineScope(currentCoroutineContext() + detachedJob).launch {
+          release.await()
+          exception = runCatching { mutex.withLock { } }.exceptionOrNull()
+        }
+        1
+      }
+      assertEquals(1, result)
+
+      // 锁已释放，同一实例的调用仍被判为嵌套
+      release.complete(Unit)
+      runCurrent()
+      assertEquals(true, exception is IllegalStateException)
+      assertFalse(exception is CancellationException)
+      assertEquals("Nested invoke", exception?.message)
+      assertEquals(2, mutex.withLock { 2 })
+    } finally {
+      release.complete(Unit)
+      detachedJob.cancel()
     }
   }
 

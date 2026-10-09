@@ -49,7 +49,7 @@
 - 被 `cancelAndJoin` 取消的加载抛出 `FLoader.ManualCancellationException`，被新的 `load` 取消的旧加载（包括 `tryLoad` 发起的）抛出 `FLoader.ReplacedCancellationException`，被调用方取消时抛出调用方的取消原因
 - 取消原因会传给子任务：在外层 Loader 的 `onLoad` 中调用内层 Loader 时，外层被取消，内层抛出的是外层的 `ManualCancellationException` 或 `ReplacedCancellationException`
 - 这些公开异常直接作为取消原因传给 `Job.cancel`，`onLoad` 内收到的也是同一类型；不能改为在 `load`/`tryLoad` 出口转换
-- 加载被多次取消时只保留最先的取消原因：先被新的 `load` 替换再被 `cancelAndJoin` 取消，抛出的仍是 `ReplacedCancellationException`；`onLoad` 捕获取消后抛出其他取消异常也不改变取消原因
+- 加载被多次取消时只保留最先的取消原因：先被新的 `load` 替换再被 `cancelAndJoin` 取消，抛出的仍是 `ReplacedCancellationException`；先被替换或被 `cancelAndJoin` 取消再被调用方取消，抛出的仍是前者的原因；`onLoad` 捕获取消后抛出其他取消异常也不改变取消原因
 - 调用方取消后旧任务仍在清理时，新的 `load` 必须等待清理结束，`tryLoad` 判忙，旧调用方收到的仍是自己的取消原因
 - `onLoad` 内启动的子协程中抛出的 `BusyCancellationException` 等取消异常按子协程取消处理，不会传播到当前加载，这是协程标准语义
 - `tryLoad` 在已有任务尚未完成时立即抛出 `FLoader.BusyCancellationException`，包括旧任务正在取消但尚未完成的阶段；它不能取消正在执行的任务
@@ -57,10 +57,12 @@
 - `cancelAndJoin` 会取消当前加载并等待其清理结束
 - `cancelAndJoin` 只取消调用时已进入 `load`/`tryLoad` 的任务，包括正在等待旧任务清理的任务；之后发起的加载不受影响
 - 调用方已取消时，`cancelAndJoin` 仍必须发起取消，只是不保证等待完成，与 `Job.cancelAndJoin()` 一致
-- 已取消的调用方不能取消其他加载：`mutate` 进入时先检查 `ensureActive`，再取消上一个任务
+- 已取消的调用方不能取消其他加载，也不能妨碍之后的 `load` 替换运行中的加载：`mutate` 进入时先检查 `ensureActive`，再登记并取消上一个任务
 - `doLoad` 只把普通异常转换为 `Result.failure`；`CancellationException` 必须重新抛出，不能被包装或吞掉。公开的 `safeRunCatching` 也遵循相同规则
 - `doLoad` 必须用 `coroutineScope` 包裹 `onLoad`：`onLoad` 用当前上下文启动的子协程挂在这个 scope 上，否则子协程的普通异常会绕过 `Result.failure`，`isLoading` 也会在子协程结束前变为 `false`
 - `isLoading` 在调用 `onLoad` 前设为 `true`，并在 `finally` 中恢复为 `false`。重新加载时会依次更新为 `false`、`true`，但 `StateFlow` 可能合并快速更新，收集者不保证收到完整序列
+- `isLoading` 在任务内更新，恢复 `false` 时任务尚未结束：此时 `tryLoad` 仍判忙，新的 `load` 或 `cancelAndJoin` 仍会取消它，`onLoad` 已返回的结果被丢弃
+- Unconfined 收集者会在 `isLoading` 的更新调用中内联执行：变为 `true` 时内联取消或替换加载，`onLoad` 仍会执行到第一个挂起点
 
 ### `FMutator`
 
@@ -68,6 +70,7 @@
 - `_job` 是最近进入的任务，可能还在等待；`_runningJob` 是已开始执行 block 且尚未结束的任务，任何时刻最多一个
 - 两个字段只在 `_lock` 内读写；锁内不能挂起，`cancel`、`join` 都放在锁外
 - `mutate` 进入时在锁内把自己设为 `_job`，锁外取消上一个 `_job`，再等待进入时读到的 `_runningJob` 结束
+- `mutate` 的 `ensureActive` 必须在登记 `_job` 之前：已取消的调用方登记后直接退出，运行中的任务没被取消又不再是 `_job`，之后的 `load` 取消不到它，会一直等待
 - `mutate` 不直接取消 `_runningJob`，依赖链式取消：每个成为 `_job` 的任务都会同步取消它读到的上一个 `_job`，一直传递到 `_runningJob`；`prevJob?.cancel` 必须紧跟登记且中间不能有挂起点，否则排队任务被调用方取消后 `_runningJob` 可能无人取消
 - 只有仍是 `_job` 的任务才能开始执行，并在同一次加锁中设为 `_runningJob`；否则说明有更新的任务进入，以 `newReplaceCause()` 取消自己。这条保证串行执行，不能去掉
 - 排队任务被取消后可能先于 `_runningJob` 结束，所以判断忙和等待时必须同时看两个字段，不能只看 `_job`
@@ -86,6 +89,7 @@
 - key 必须按实例隔离，不能改为共享或静态 key，否则多个 loader 相互嵌套时会被误判
 - 嵌套检测依赖协程上下文。在 `withLock`/`onLoad` 内通过 `runBlocking`、新线程等方式绕开原上下文时无法检测，可能导致自锁；公开 KDoc 必须持续说明这一限制
 - 嵌套检测会在锁内的协程上下文中加入元素，`flow {}` 中在 `withLock`/`onLoad` 内 `emit` 会违反 Flow 的上下文约束；公开 KDoc 必须持续说明这一限制
+- 嵌套标记随协程上下文传递：在 `withLock`/`onLoad` 内继承上下文但换成独立 `Job` 的协程，在锁释放或加载结束后调用同一实例仍会抛出 `Nested invoke`
 - `FLoader.load`、`tryLoad` 和 `cancelAndJoin` 都必须在进入任务簿记或锁等待前执行嵌套检查
 
 ## 测试约定
@@ -100,15 +104,16 @@
 - 修改并发逻辑时至少覆盖成功、普通异常、取消、忙状态、嵌套调用、锁释放和 `isLoading`/Flow 状态序列
 - 引用释放测试在 `runTest` 退出后等待真实 GC，并保持 loader 存活且不再发起加载
 - 验证清理期间的引用释放时，用独立根 scope 保持旧任务清理挂起，GC 检查后再放行
+- 多线程压力用例的轮数按竞态窗口定：验证 `tryLoad` 判忙与登记的原子性用 1000 轮，机器满载时 100 轮发现不了回归
 
 | 测试类 | 覆盖范围 |
 |---|---|
-| `LoaderTest` | 加载结果、取消（含先被替换再被 `cancelAndJoin` 取消时保留替换原因，以及 `onLoad` 捕获取消后抛出其他取消异常）、忙状态（含忙异常不取消调用方）、排队（含旧任务结束后恢复前被 `cancelAndJoin` 取消，以及旧任务调用方取消后新 `load` 与 `cancelAndJoin` 等待清理且保留调用方原因）、多线程（含 `onLoad` 抛普通异常、Unconfined 下混合 `tryLoad`，并校验取消原因类型）、嵌套（含新根 scope 绕开检测后 `load` 替换外层、`tryLoad` 判忙穿透外层、`cancelAndJoin` 取消外层）、Unconfined 下运行中和排队中调用方 `finally` 内联重入（含被替换时 `tryLoad` 判忙、被 `cancelAndJoin` 取消时 `tryLoad` 立即执行）、`loadingFlow`（含普通异常、排队加载被替换和 `tryLoad` 被替换）和 `stateFlow` 序列 |
+| `LoaderTest` | 加载结果、取消（含先被替换再被 `cancelAndJoin` 取消时保留替换原因，先被替换或被 `cancelAndJoin` 取消再被调用方取消时保留最先原因，`onLoad` 捕获取消后抛出其他取消异常，以及已取消的调用方不妨碍之后的 `load` 替换运行中的加载）、忙状态（含忙异常不取消调用方）、排队（含旧任务结束后恢复前被 `cancelAndJoin` 取消，排队任务刚登记就被调用方取消后旧任务仍被取消，以及旧任务调用方取消后新 `load` 与 `cancelAndJoin` 等待清理且保留调用方原因）、多线程（含 `onLoad` 抛普通异常、Unconfined 下混合 `tryLoad`，并校验取消原因类型）、嵌套（含新根 scope 绕开检测后 `load` 替换外层、`tryLoad` 判忙穿透外层、`cancelAndJoin` 取消外层，以及继承上下文的独立协程在加载结束后仍被判为嵌套）、Unconfined 下运行中和排队中调用方 `finally` 内联重入（含被替换时 `tryLoad` 判忙、被 `cancelAndJoin` 取消时运行中调用方的 `tryLoad` 立即执行而排队调用方的 `tryLoad` 判忙，以及排队调用方被替换时 `cancelAndJoin` 取消新 `load`）、Unconfined 收集者在 `isLoading` 变化时内联调用 `load`、`tryLoad` 和 `cancelAndJoin`、`loadingFlow`（含普通异常、排队加载被替换和 `tryLoad` 被替换）和 `stateFlow` 序列 |
 | `LoaderCallbackTest` | `load` 与 `tryLoad` 的异常包装、子协程生命周期（含回调抛取消异常时子协程收到同一原因并等待清理、子协程内其他 Loader 的忙异常不传播，以及独立 scope 启动的协程不延长加载）、线程上下文安装期间的取消、回调内的嵌套调用和 Flow 上下文约束 |
 | `LoaderQueuedCleanupTest` | `load` 与 `tryLoad` 发起的任务在排队调用方取消或超时后仍保持忙状态和清理等待，以及之后的新 `load` 等待清理后执行 |
 | `LoaderReferenceTest` | `load` 与 `tryLoad` 在成功、普通异常和取消异常退出后释放结果、异常数据及回调闭包捕获的对象，被替换或 `cancelAndJoin` 取消后释放回调闭包捕获的对象，以及排队加载被替换、被 `cancelAndJoin` 取消或被调用方取消后释放回调闭包，被调用方取消后释放异常数据（含旧任务仍在清理时，排队调用方取消后释放回调闭包和取消数据） |
 | `MutatorTest` | 已取消调用方的任务登记、已登记 `load` 与 `tryLoad` 的取消和替换、上下文探针的暂停位置，新任务登记后尚未发起取消时的排队任务替换、手动取消和忙状态，以及 `cancelAndJoin` 的取消顺序 |
-| `MutexTest` | 互斥（含多线程和 Unconfined）、锁释放（含 `action` 抛出取消异常，以及吞掉取消后正常返回时仍抛出）、嵌套（含子协程、隔着其他实例回到同一实例，以及新根 scope 绕开检测后等待锁）和 Flow 上下文约束 |
+| `MutexTest` | 互斥（含多线程和 Unconfined）、锁释放（含 `action` 抛出取消异常，以及吞掉取消后正常返回时仍抛出）、嵌套（含子协程、隔着其他实例回到同一实例，新根 scope 绕开检测后等待锁，以及继承上下文的独立协程在锁释放后仍被判为嵌套）和 Flow 上下文约束 |
 
 ## 编码与发布约定
 

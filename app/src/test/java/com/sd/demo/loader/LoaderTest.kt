@@ -6,8 +6,10 @@ import com.sd.lib.loader.loadingFlow
 import com.sd.lib.loader.safeRunCatching
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.async
@@ -17,6 +19,7 @@ import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.joinAll
 import kotlinx.coroutines.launch
@@ -259,6 +262,16 @@ class LoaderTest {
   }
 
   @Test
+  fun `test load when caller cancelled after replaced`() = runTest {
+    checkCallerCancelledAfterCancelled(replace = true)
+  }
+
+  @Test
+  fun `test load when caller cancelled after cancelAndJoin`() = runTest {
+    checkCallerCancelledAfterCancelled(replace = false)
+  }
+
+  @Test
   fun `test load when throw other CancellationException after replaced`() = runTest {
     checkOtherCancellationAfterCancelled(replace = true)
   }
@@ -266,6 +279,36 @@ class LoaderTest {
   @Test
   fun `test load when throw other CancellationException after cancelAndJoin`() = runTest {
     checkOtherCancellationAfterCancelled(replace = false)
+  }
+
+  @Test
+  fun `test load when throw other CancellationException after caller cancelled`() = runTest {
+    val loader = FLoader()
+    val cause = CustomCancellationException()
+    var exceptionInBlock: Throwable? = null
+    var loadException: Throwable? = null
+    val job = launch {
+      loadException = runCatching {
+        loader.load {
+          try {
+            delay(Long.MAX_VALUE)
+          } catch (e: CancellationException) {
+            exceptionInBlock = e
+            throw CustomCancellationException(2)
+          }
+        }
+      }.exceptionOrNull()
+    }.also { runCurrent() }
+
+    job.cancel(cause)
+    job.join()
+
+    // 调用方取消后 onLoad 抛出其他取消异常，仍保留调用方的取消原因
+    assertSame(cause, exceptionInBlock)
+    assertSame(cause, loadException)
+    assertEquals(true, job.isCancelled)
+    assertEquals(false, loader.isLoading())
+    assertEquals(3, loader.tryLoad { 3 }.getOrThrow())
   }
 
   @Test
@@ -814,6 +857,43 @@ class LoaderTest {
   }
 
   @Test
+  fun `test nested call from detached coroutine with inherited context after load finished`() = runTest {
+    val loader = FLoader()
+    val release = CompletableDeferred<Unit>()
+    val detachedJob = Job()
+    val causes = mutableListOf<Throwable?>()
+
+    try {
+      val result = loader.load {
+        // 继承当前上下文但换成独立 Job 的协程不挂在加载上，却带着嵌套标记
+        CoroutineScope(currentCoroutineContext() + detachedJob).launch {
+          release.await()
+          causes.add(runCatching { loader.load { } }.exceptionOrNull())
+          causes.add(runCatching { loader.tryLoad { } }.exceptionOrNull())
+          causes.add(runCatching { loader.cancelAndJoin() }.exceptionOrNull())
+        }
+        1
+      }
+      assertEquals(1, result.getOrThrow())
+      assertEquals(false, loader.isLoading())
+
+      // 外层加载已结束，这些调用仍被判为嵌套
+      release.complete(Unit)
+      runCurrent()
+      assertEquals(3, causes.size)
+      causes.forEach { cause ->
+        assertTrue(cause is IllegalStateException)
+        assertEquals("Nested invoke", cause?.message)
+      }
+      assertEquals(false, loader.isLoading())
+      assertEquals(2, loader.tryLoad { 2 }.getOrThrow())
+    } finally {
+      release.complete(Unit)
+      detachedJob.cancel()
+    }
+  }
+
+  @Test
   fun `test load other loader in block`() = runTest {
     val loader = FLoader()
     val otherLoader = FLoader()
@@ -1272,6 +1352,26 @@ class LoaderTest {
     }
   }
 
+  // 回归时新的 load 会一直等待未被取消的旧任务，用超时让测试失败而不是卡住
+  @Test(timeout = 10_000)
+  fun `test queued load cancelled right after registration still cancels running load`() = runTest {
+    val loader = FLoader()
+    val container = mutableListOf<String>()
+    val firstJob = async {
+      runCatching { loader.load { delay(Long.MAX_VALUE) } }.exceptionOrNull()
+    }.also { runCurrent() }
+
+    // 排队任务登记后不让出调度就被调用方取消，运行中的旧任务仍须已被取消
+    val queuedJob = launch(start = CoroutineStart.UNDISPATCHED) { loader.load { container.add("queued") } }
+    queuedJob.cancel()
+
+    assertEquals(2, loader.load { 2 }.getOrThrow())
+    assertTrue(firstJob.await() is FLoader.ReplacedCancellationException)
+    assertEquals(true, queuedJob.isCompleted)
+    assertEquals(emptyList<String>(), container)
+    assertEquals(false, loader.isLoading())
+  }
+
   @Test
   fun `test load when caller already cancelled`() = runTest {
     val loader = FLoader()
@@ -1321,6 +1421,29 @@ class LoaderTest {
     assertEquals("1", container)
     assertEquals(false, loader.isLoading())
     assertEquals(3, loader.tryLoad { 3 }.getOrThrow())
+  }
+
+  // 回归时新的 load 会一直等待未被取消的旧任务，用超时让测试失败而不是卡住
+  @Test(timeout = 10_000)
+  fun `test load replaces running load after already cancelled caller`() = runTest {
+    val loader = FLoader()
+    val cause = CustomCancellationException()
+    var thrown: Throwable? = null
+    val firstJob = async {
+      runCatching { loader.load { delay(Long.MAX_VALUE) } }.exceptionOrNull()
+    }.also { runCurrent() }
+
+    launch {
+      currentCoroutineContext().cancel(cause)
+      thrown = runCatching { loader.load { } }.exceptionOrNull()
+    }.also { runCurrent() }
+    assertSame(cause, thrown)
+    assertEquals(false, firstJob.isCompleted)
+
+    // 已取消的调用方不能顶掉运行中任务的登记，之后的 load 仍须能替换它
+    assertEquals(2, loader.load { 2 }.getOrThrow())
+    assertTrue(firstJob.await() is FLoader.ReplacedCancellationException)
+    assertEquals(false, loader.isLoading())
   }
 
   @Test
@@ -1567,7 +1690,8 @@ class LoaderTest {
   @Test(timeout = 10_000)
   fun `test concurrent tryLoad accepts only one caller`() = runTest {
     withContext(Dispatchers.Default) {
-      repeat(100) {
+      // 判忙与登记不原子的窗口很窄，机器满载时轮数少了撞不上
+      repeat(1000) {
         val loader = FLoader()
         val start = CompletableDeferred<Unit>()
         val releaseLoad = CompletableDeferred<Unit>()
@@ -2595,6 +2719,120 @@ class LoaderTest {
     assertEquals(1, loader.tryLoad { 1 }.getOrThrow())
   }
 
+  @Test(timeout = 10_000)
+  fun `test tryLoad from replaced queued caller finally on Unconfined`() = runTest {
+    val loader = FLoader()
+    val container = mutableListOf<String>()
+    var tryLoadCause: Throwable? = null
+    launch {
+      loader.load {
+        try {
+          delay(Long.MAX_VALUE)
+        } finally {
+          withContext(NonCancellable) { delay(1000) }
+          container.add("old-cleaned")
+        }
+      }
+    }.also { runCurrent() }
+
+    val queuedJob = launch(Dispatchers.Unconfined) {
+      try {
+        loader.load { container.add("queued-load") }
+      } finally {
+        // 排队任务在新 load 的取消调用内联结束，此时旧任务仍在清理、新 load 已登记，tryLoad 必须立即判忙
+        tryLoadCause = runCatching { loader.tryLoad { container.add("finally-tryLoad") } }.exceptionOrNull()
+      }
+    }.also { runCurrent() }
+
+    val startTime = currentTime
+    assertEquals(2, loader.load {
+      container.add("new-load")
+      2
+    }.getOrThrow())
+    assertTrue(tryLoadCause is FLoader.BusyCancellationException)
+    assertEquals(true, queuedJob.isCompleted)
+    assertEquals(listOf("old-cleaned", "new-load"), container)
+    assertEquals(startTime + 1000, currentTime)
+    assertEquals(false, loader.isLoading())
+    assertEquals(1, loader.tryLoad { 1 }.getOrThrow())
+  }
+
+  @Test(timeout = 10_000)
+  fun `test tryLoad from cancelled queued caller finally on Unconfined`() = runTest {
+    val loader = FLoader()
+    val container = mutableListOf<String>()
+    var tryLoadCause: Throwable? = null
+    launch {
+      loader.load {
+        try {
+          delay(Long.MAX_VALUE)
+        } finally {
+          withContext(NonCancellable) { delay(1000) }
+          container.add("old-cleaned")
+        }
+      }
+    }.also { runCurrent() }
+
+    val queuedJob = launch(Dispatchers.Unconfined) {
+      try {
+        loader.load { container.add("queued-load") }
+      } finally {
+        // 与运行中任务被 cancelAndJoin 取消时不同，排队任务内联结束后旧任务仍在清理，tryLoad 必须立即判忙
+        tryLoadCause = runCatching { loader.tryLoad { container.add("finally-tryLoad") } }.exceptionOrNull()
+      }
+    }.also { runCurrent() }
+
+    val startTime = currentTime
+    loader.cancelAndJoin()
+    container.add("cancel-finished")
+    assertTrue(tryLoadCause is FLoader.BusyCancellationException)
+    assertEquals(true, queuedJob.isCompleted)
+    assertEquals(listOf("old-cleaned", "cancel-finished"), container)
+    assertEquals(startTime + 1000, currentTime)
+    assertEquals(false, loader.isLoading())
+    assertEquals(1, loader.tryLoad { 1 }.getOrThrow())
+  }
+
+  @Test(timeout = 10_000)
+  fun `test cancelAndJoin from replaced queued caller finally on Unconfined`() = runTest {
+    val loader = FLoader()
+    val container = mutableListOf<String>()
+    launch {
+      loader.load {
+        try {
+          delay(Long.MAX_VALUE)
+        } finally {
+          withContext(NonCancellable) { delay(1000) }
+          container.add("old-cleaned")
+        }
+      }
+    }.also { runCurrent() }
+
+    val queuedJob = launch(Dispatchers.Unconfined) {
+      try {
+        loader.load { container.add("queued-load") }
+      } finally {
+        // 排队任务在新 load 的取消调用内联结束，这里的 cancelAndJoin 会取消那个已登记的新 load，并等旧任务清理结束
+        loader.cancelAndJoin()
+        container.add("cancel-finished")
+      }
+    }.also { runCurrent() }
+
+    val startTime = currentTime
+    val exception = runCatching { loader.load { container.add("new-load") } }.exceptionOrNull()
+    assertTrue(exception is FLoader.ManualCancellationException)
+    assertEquals(startTime, currentTime)
+    assertEquals(false, queuedJob.isCompleted)
+    assertEquals(emptyList<String>(), container)
+
+    advanceUntilIdle()
+    assertEquals(true, queuedJob.isCompleted)
+    assertEquals(listOf("old-cleaned", "cancel-finished"), container)
+    assertEquals(startTime + 1000, currentTime)
+    assertEquals(false, loader.isLoading())
+    assertEquals(1, loader.tryLoad { 1 }.getOrThrow())
+  }
+
   @Test
   fun `test cancel when idle`() = runTest {
     val loader = FLoader()
@@ -2644,6 +2882,151 @@ class LoaderTest {
       assertEquals(FLoader.State(isLoading = false), awaitItem())
       assertEquals(true, job.isCancelled)
     }
+  }
+
+  @Test(timeout = 10_000)
+  fun `test cancelAndJoin from Unconfined collector when loading starts`() = runTest {
+    val loader = FLoader()
+    val container = mutableListOf<String>()
+    val collectorJob = launch(Dispatchers.Unconfined) {
+      loader.stateFlow.first { it.isLoading }
+      // 收集者在 isLoading 变为 true 的更新调用内联执行，此时加载已登记但尚未进入 onLoad
+      container.add("collector-cancel")
+      loader.cancelAndJoin()
+      container.add("collector-cancel-finished")
+    }
+
+    val exception = runCatching {
+      loader.load {
+        container.add("load-entered")
+        delay(Long.MAX_VALUE)
+      }
+    }.exceptionOrNull()
+
+    // 取消早于 onLoad，onLoad 仍会执行到第一个挂起点
+    assertTrue(exception is FLoader.ManualCancellationException)
+    assertEquals(true, collectorJob.isCompleted)
+    assertEquals(listOf("collector-cancel", "load-entered", "collector-cancel-finished"), container)
+    assertEquals(false, loader.isLoading())
+    assertEquals(1, loader.tryLoad { 1 }.getOrThrow())
+  }
+
+  @Test(timeout = 10_000)
+  fun `test load from Unconfined collector when loading starts`() = runTest {
+    val loader = FLoader()
+    val container = mutableListOf<String>()
+    var collectorResult: Result<Int>? = null
+    val collectorJob = launch(Dispatchers.Unconfined) {
+      loader.stateFlow.first { it.isLoading }
+      // 收集者在 isLoading 变为 true 的更新调用内联执行，这里发起的 load 会替换尚未进入 onLoad 的加载
+      container.add("collector-load")
+      collectorResult = loader.load {
+        container.add("collector-load-entered")
+        2
+      }
+    }
+
+    val exception = runCatching {
+      loader.load {
+        container.add("load-entered")
+        delay(Long.MAX_VALUE)
+      }
+    }.exceptionOrNull()
+
+    // 替换早于 onLoad，onLoad 仍会执行到第一个挂起点
+    assertTrue(exception is FLoader.ReplacedCancellationException)
+    assertEquals(true, collectorJob.isCompleted)
+    assertEquals(2, collectorResult?.getOrThrow())
+    assertEquals(listOf("collector-load", "load-entered", "collector-load-entered"), container)
+    assertEquals(false, loader.isLoading())
+    assertEquals(1, loader.tryLoad { 1 }.getOrThrow())
+  }
+
+  @Test(timeout = 10_000)
+  fun `test load from Unconfined collector when loading ends`() = runTest {
+    val loader = FLoader()
+    val container = mutableListOf<String>()
+    var collectorResult: Result<Int>? = null
+    val collectorJob = launch(Dispatchers.Unconfined) {
+      loader.stateFlow.first { it.isLoading }
+      loader.stateFlow.first { !it.isLoading }
+      // 收集者在 isLoading 恢复 false 的更新调用内联执行，此时加载尚未结束，这里发起的 load 仍会替换它
+      collectorResult = loader.load {
+        container.add("collector-load-entered")
+        2
+      }
+    }
+
+    val exception = runCatching {
+      loader.load {
+        container.add("load-returned")
+        1
+      }
+    }.exceptionOrNull()
+
+    // onLoad 已返回的结果被丢弃
+    assertTrue(exception is FLoader.ReplacedCancellationException)
+    assertEquals(true, collectorJob.isCompleted)
+    assertEquals(2, collectorResult?.getOrThrow())
+    assertEquals(listOf("load-returned", "collector-load-entered"), container)
+    assertEquals(false, loader.isLoading())
+    assertEquals(3, loader.tryLoad { 3 }.getOrThrow())
+  }
+
+  @Test(timeout = 10_000)
+  fun `test cancelAndJoin from Unconfined collector when loading ends`() = runTest {
+    val loader = FLoader()
+    val container = mutableListOf<String>()
+    val collectorJob = launch(Dispatchers.Unconfined) {
+      loader.stateFlow.first { it.isLoading }
+      loader.stateFlow.first { !it.isLoading }
+      // 收集者在 isLoading 恢复 false 的更新调用内联执行，此时加载尚未结束，这里的 cancelAndJoin 仍会取消它
+      loader.cancelAndJoin()
+      container.add("collector-cancel-finished")
+    }
+
+    val exception = runCatching {
+      loader.load {
+        container.add("load-returned")
+        1
+      }
+    }.exceptionOrNull()
+
+    // onLoad 已返回的结果被丢弃
+    assertTrue(exception is FLoader.ManualCancellationException)
+    assertEquals(true, collectorJob.isCompleted)
+    assertEquals(listOf("load-returned", "collector-cancel-finished"), container)
+    assertEquals(false, loader.isLoading())
+    assertEquals(2, loader.tryLoad { 2 }.getOrThrow())
+  }
+
+  @Test(timeout = 10_000)
+  fun `test tryLoad from Unconfined collector when loading ends`() = runTest {
+    val loader = FLoader()
+    val container = mutableListOf<String>()
+    var loadingInCollector: Boolean? = null
+    var tryLoadCause: Throwable? = null
+    val collectorJob = launch(Dispatchers.Unconfined) {
+      loader.stateFlow.first { it.isLoading }
+      loader.stateFlow.first { !it.isLoading }
+      // 收集者在 isLoading 恢复 false 的更新调用内联执行，此时加载尚未结束，tryLoad 必须立即判忙
+      loadingInCollector = loader.isLoading()
+      tryLoadCause = runCatching { loader.tryLoad { container.add("collector-tryLoad") } }.exceptionOrNull()
+    }
+
+    val result = loader.load {
+      container.add("load-returned")
+      1
+    }
+
+    // 判忙不影响正在结束的加载
+    assertEquals(1, result.getOrThrow())
+    assertEquals(true, collectorJob.isCompleted)
+    assertEquals(false, loadingInCollector)
+    assertTrue(tryLoadCause is FLoader.BusyCancellationException)
+    assertEquals(listOf("load-returned"), container)
+    assertEquals(false, loader.isLoading())
+    assertEquals(2, loader.tryLoad { 2 }.getOrThrow())
   }
 
   @Test
@@ -2707,6 +3090,58 @@ class LoaderTest {
     assertEquals(false, otherLoader.isLoading())
     assertEquals(3, loader.tryLoad { 3 }.getOrThrow())
     assertEquals(4, otherLoader.tryLoad { 4 }.getOrThrow())
+  }
+
+  private suspend fun TestScope.checkCallerCancelledAfterCancelled(replace: Boolean) {
+    val loader = FLoader()
+    val releaseCleanup = CompletableDeferred<Unit>()
+    var exceptionInBlock: Throwable? = null
+    var loadException: Throwable? = null
+    val firstJob = launch {
+      loadException = runCatching {
+        loader.load {
+          try {
+            delay(Long.MAX_VALUE)
+          } catch (e: CancellationException) {
+            exceptionInBlock = e
+            throw e
+          } finally {
+            withContext(NonCancellable) { releaseCleanup.await() }
+          }
+        }
+      }.exceptionOrNull()
+    }.also { runCurrent() }
+
+    try {
+      val nextJob = async {
+        if (replace) {
+          loader.load { 2 }.getOrThrow()
+        } else {
+          loader.cancelAndJoin()
+          2
+        }
+      }.also { runCurrent() }
+      assertEquals(false, firstJob.isCompleted)
+      assertEquals(false, nextJob.isCompleted)
+
+      firstJob.cancel(CustomCancellationException())
+      runCurrent()
+      assertEquals(true, firstJob.isCancelled)
+      assertEquals(false, firstJob.isCompleted)
+
+      releaseCleanup.complete(Unit)
+      firstJob.join()
+      assertEquals(2, nextJob.await())
+
+      // 先被替换或被 cancelAndJoin 取消再被调用方取消的加载保留最先的取消原因
+      val expectedType = if (replace) FLoader.ReplacedCancellationException::class else FLoader.ManualCancellationException::class
+      assertEquals(expectedType, exceptionInBlock!!::class)
+      assertEquals(expectedType, loadException!!::class)
+      assertEquals(false, loader.isLoading())
+      assertEquals(3, loader.tryLoad { 3 }.getOrThrow())
+    } finally {
+      releaseCleanup.complete(Unit)
+    }
   }
 
   private suspend fun TestScope.checkOtherCancellationAfterCancelled(replace: Boolean) {
