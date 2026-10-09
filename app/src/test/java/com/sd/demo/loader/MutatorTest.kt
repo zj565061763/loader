@@ -14,6 +14,7 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -143,6 +144,39 @@ class MutatorTest {
     }
   }
 
+  // 入口检查挪到登记之后时探针用例发现不了，这里靠并发的 tryLoad 撞上已取消调用方短暂登记的窗口
+  @Test(timeout = 10_000)
+  fun `test already cancelled tryLoad does not make idle loader busy on multiple threads`() = runTest {
+    withContext(Dispatchers.Default) {
+      val loader = FLoader()
+      val stop = AtomicBoolean()
+      coroutineScope {
+        repeat(4) {
+          launch {
+            // 不断以已取消的调用方调用 tryLoad
+            while (!stop.get()) {
+              runCatching {
+                coroutineScope {
+                  currentCoroutineContext().cancel()
+                  loader.tryLoad { }
+                }
+              }
+            }
+          }
+        }
+        try {
+          // 已取消的调用方不登记任务，正常的 tryLoad 不能被判忙
+          repeat(20_000) {
+            val cause = runCatching { loader.tryLoad { }.getOrThrow() }.exceptionOrNull()
+            assertEquals(null, cause)
+          }
+        } finally {
+          stop.set(true)
+        }
+      }
+    }
+  }
+
   @Test(timeout = 10_000)
   fun `test queued task cannot run after newer task registered before cancellation`() = runTest {
     Executors.newSingleThreadExecutor().asCoroutineDispatcher().use { replacementDispatcher ->
@@ -213,6 +247,90 @@ class MutatorTest {
       } finally {
         allowNewestCancel.countDown()
         releaseCleanup.complete(Unit)
+      }
+    }
+  }
+
+  @Test(timeout = 10_000)
+  fun `test replaced queued task is not registered as running task`() = runTest {
+    Executors.newSingleThreadExecutor().asCoroutineDispatcher().use { queuedDispatcher ->
+      Executors.newSingleThreadExecutor().asCoroutineDispatcher().use { latestDispatcher ->
+        val replacements = AtomicInteger()
+        val latestRegistered = CompletableDeferred<Unit>()
+        val allowLatestCancel = CountDownLatch(1)
+        val queuedReplaced = CompletableDeferred<Unit>()
+        val allowQueuedCancel = CountDownLatch(1)
+        val cleanupStarted = CompletableDeferred<Unit>()
+        val releaseCleanup = CompletableDeferred<Unit>()
+        val queuedEntered = AtomicBoolean()
+        val latestEntered = AtomicBoolean()
+        val mutator = FMutator(
+          newCancelCause = { FLoader.ManualCancellationException() },
+          newReplaceCause = {
+            when (replacements.incrementAndGet()) {
+              2 -> {
+                // 最新任务已登记，暂停它对排队任务的取消
+                latestRegistered.complete(Unit)
+                check(allowLatestCancel.await(5, TimeUnit.SECONDS))
+              }
+              3 -> {
+                // 排队任务已发现自己被顶替，暂停它对自己的取消
+                queuedReplaced.complete(Unit)
+                check(allowQueuedCancel.await(5, TimeUnit.SECONDS))
+              }
+            }
+            FLoader.ReplacedCancellationException()
+          },
+          newBusyCause = { FLoader.BusyCancellationException() },
+        )
+
+        val first = async {
+          runCatching {
+            mutator.mutate {
+              try {
+                delay(Long.MAX_VALUE)
+              } finally {
+                withContext(NonCancellable) {
+                  cleanupStarted.complete(Unit)
+                  releaseCleanup.await()
+                }
+              }
+            }
+          }.exceptionOrNull()
+        }.also { runCurrent() }
+
+        try {
+          val queued = async(queuedDispatcher) {
+            runCatching { mutator.mutate { queuedEntered.set(true) } }.exceptionOrNull()
+          }
+          cleanupStarted.await()
+          val latest = async(latestDispatcher) {
+            runCatching { mutator.mutate { latestEntered.set(true) } }.exceptionOrNull()
+          }
+          latestRegistered.await()
+
+          releaseCleanup.complete(Unit)
+          queuedReplaced.await()
+          assertTrue(first.await() is FLoader.ReplacedCancellationException)
+
+          val cancelJob = launch { mutator.cancelAndJoin() }.also { runCurrent() }
+          assertEquals(false, cancelJob.isCompleted)
+
+          // 被顶替的排队任务不是运行任务，cancelAndJoin 取消不到它，它仍以替换原因退出
+          allowQueuedCancel.countDown()
+          assertTrue(queued.await() is FLoader.ReplacedCancellationException)
+          assertEquals(false, queuedEntered.get())
+
+          allowLatestCancel.countDown()
+          assertTrue(latest.await() is FLoader.ManualCancellationException)
+          assertEquals(false, latestEntered.get())
+          cancelJob.join()
+          assertEquals(4, mutator.mutateOrThrow { 4 })
+        } finally {
+          allowLatestCancel.countDown()
+          allowQueuedCancel.countDown()
+          releaseCleanup.complete(Unit)
+        }
       }
     }
   }
