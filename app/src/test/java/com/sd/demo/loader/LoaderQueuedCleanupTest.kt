@@ -204,6 +204,54 @@ class LoaderQueuedCleanupTest(private val useTryLoad: Boolean) {
   }
 
   @Test
+  fun `test load when queued caller cancelled during previous cleanup`() = runTest {
+    val loader = FLoader()
+    val container = mutableListOf<String>()
+    var cleanupStarted = false
+
+    val first = async {
+      runCatching {
+        loader.loadForTest {
+          try {
+            delay(Long.MAX_VALUE)
+          } finally {
+            withContext(NonCancellable) {
+              cleanupStarted = true
+              delay(1000)
+            }
+            container.add("old-cleaned")
+          }
+        }
+      }.exceptionOrNull()
+    }.also { runCurrent() }
+
+    val queuedJob = launch { loader.load { container.add("queued-load") } }.also { runCurrent() }
+    queuedJob.cancelAndJoin()
+    assertEquals(true, cleanupStarted)
+    assertEquals(false, first.isCompleted)
+
+    // 排队任务已取消，新的 load 仍须等待旧任务清理结束后执行一次
+    val startTime = currentTime
+    val next = async {
+      loader.load {
+        container.add("new-load")
+        2
+      }
+    }.also { runCurrent() }
+    assertEquals(false, next.isCompleted)
+    assertEquals(true, loader.isLoading())
+    assertEquals(emptyList<String>(), container)
+
+    advanceUntilIdle()
+    assertTrue(first.await() is FLoader.ReplacedCancellationException)
+    assertEquals(2, next.await().getOrThrow())
+    assertEquals(listOf("old-cleaned", "new-load"), container)
+    assertEquals(startTime + 1000, currentTime)
+    assertEquals(false, loader.isLoading())
+    assertEquals(3, loader.tryLoad { 3 }.getOrThrow())
+  }
+
+  @Test
   fun `test tryLoad and cancelAndJoin when queued loads cancelled repeatedly during previous cleanup`() = runTest {
     val loader = FLoader()
     var container = ""

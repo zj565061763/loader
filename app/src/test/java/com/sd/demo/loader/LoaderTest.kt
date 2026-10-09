@@ -1826,6 +1826,43 @@ class LoaderTest {
     }
   }
 
+  @Test(timeout = 10_000)
+  fun `test cancelAndJoin cancels queued load resumed after previous finished`() = runTest {
+    val loader = FLoader()
+    val queuedScheduler = TestCoroutineScheduler()
+    val queuedDispatcher = StandardTestDispatcher(queuedScheduler)
+    var queuedEntered = false
+    val firstJob = async {
+      runCatching { loader.load { delay(Long.MAX_VALUE) } }.exceptionOrNull()
+    }.also { runCurrent() }
+
+    // 使用独立调度器，让排队任务在旧任务结束后仍停在恢复前
+    val queuedJob = async(queuedDispatcher + queuedScheduler) {
+      runCatching { loader.load { queuedEntered = true } }.exceptionOrNull()
+    }
+    try {
+      queuedScheduler.runCurrent()
+      runCurrent()
+      assertTrue(firstJob.await() is FLoader.ReplacedCancellationException)
+      assertEquals(false, queuedJob.isCompleted)
+
+      val cancelJob = launch { loader.cancelAndJoin() }.also { runCurrent() }
+      assertEquals(false, cancelJob.isCompleted)
+
+      // 排队任务恢复后发现自己已被取消，不能执行回调
+      queuedScheduler.runCurrent()
+      runCurrent()
+      assertTrue(queuedJob.await() is FLoader.ManualCancellationException)
+      assertEquals(false, queuedEntered)
+      assertEquals(true, cancelJob.isCompleted)
+      assertEquals(false, loader.isLoading())
+      assertEquals(1, loader.tryLoad { 1 }.getOrThrow())
+    } finally {
+      queuedScheduler.runCurrent()
+      runCurrent()
+    }
+  }
+
   @Test
   fun `test concurrent cancelAndJoin and load waiting previous cleanup on multiple threads`() = runTest {
     withContext(Dispatchers.Default) {

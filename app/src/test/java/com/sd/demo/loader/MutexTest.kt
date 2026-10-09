@@ -17,6 +17,7 @@ import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.channelFlow
 import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.joinAll
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.advanceUntilIdle
@@ -347,6 +348,18 @@ class MutexTest {
 
     // 取消后锁应释放
     assertEquals(1, mutex.withLock { 1 })
+  }
+
+  @Test
+  fun `test withLock when action throws CancellationException`() = runTest {
+    val mutex = FMutex()
+    val cause = CustomCancellationException(3)
+    val thrown = runCatching { mutex.withLock { throw cause } }.exceptionOrNull()
+
+    // 取消异常原样抛出，不取消调用方，锁也已释放
+    assertSame(cause, thrown)
+    assertEquals(true, currentCoroutineContext().isActive)
+    assertEquals(2, mutex.withLock { 2 })
   }
 
   @Test
