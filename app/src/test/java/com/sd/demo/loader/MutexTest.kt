@@ -397,6 +397,23 @@ class MutexTest {
   }
 
   @Test
+  fun `test withLock nested in child coroutine`() = runTest {
+    val mutex = FMutex()
+    // 子协程继承上下文，嵌套调用同样会被检测
+    val exception = runCatching {
+      mutex.withLock {
+        coroutineScope {
+          launch { mutex.withLock { } }
+        }
+      }
+    }.exceptionOrNull()
+    assertEquals(true, exception is IllegalStateException)
+    assertFalse(exception is CancellationException)
+    assertEquals("Nested invoke", exception?.message)
+    assertEquals(2, mutex.withLock { 2 })
+  }
+
+  @Test
   fun `test withLock when caller already cancelled and mutex idle`() = runTest {
     val mutex = FMutex()
     val cause = CustomCancellationException(1)

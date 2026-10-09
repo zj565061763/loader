@@ -6,10 +6,12 @@ package com.sd.demo.loader
 import com.sd.lib.loader.FLoader
 import com.sd.lib.loader.FMutator
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.currentCoroutineContext
@@ -274,6 +276,57 @@ class MutatorTest {
         releaseCleanup.complete(Unit)
         first.cancelAndJoin()
         latest.cancelAndJoin()
+      }
+    }
+  }
+
+  @Test(timeout = 10_000)
+  fun `test cancelAndJoin cancels queued task before running task`() = runTest {
+    Executors.newSingleThreadExecutor().asCoroutineDispatcher().use { queuedDispatcher ->
+      val cancelCauses = AtomicInteger()
+      val queuedRegistered = CompletableDeferred<Unit>()
+      val allowQueuedCancel = CountDownLatch(1)
+      val queuedFinished = CountDownLatch(1)
+      val queuedEntered = AtomicBoolean()
+      val mutator = FMutator(
+        newCancelCause = {
+          if (cancelCauses.incrementAndGet() == 2) {
+            // 第一个任务已取消、第二个尚未取消时，放行排队任务让它尝试执行
+            allowQueuedCancel.countDown()
+            check(queuedFinished.await(5, TimeUnit.SECONDS))
+          }
+          FLoader.ManualCancellationException()
+        },
+        newReplaceCause = {
+          queuedRegistered.complete(Unit)
+          check(allowQueuedCancel.await(5, TimeUnit.SECONDS))
+          FLoader.ReplacedCancellationException()
+        },
+        newBusyCause = { FLoader.BusyCancellationException() },
+      )
+
+      // 运行中任务在 Unconfined 上，取消时会在取消方线程内联结束
+      val first = async(Dispatchers.Unconfined) {
+        runCatching { mutator.mutate { awaitCancellation() } }.exceptionOrNull()
+      }
+      val queued = async(queuedDispatcher) {
+        runCatching { mutator.mutate { queuedEntered.set(true) } }.exceptionOrNull()
+      }
+      queued.invokeOnCompletion { queuedFinished.countDown() }
+
+      try {
+        queuedRegistered.await()
+        mutator.cancelAndJoin()
+        // 先取消排队任务再取消运行任务，排队任务才不会趁运行任务内联结束时开始执行
+        assertEquals(false, queuedEntered.get())
+        assertTrue(queued.await() is FLoader.ManualCancellationException)
+        assertTrue(first.await() is FLoader.ReplacedCancellationException)
+        assertEquals(3, mutator.mutateOrThrow { 3 })
+      } finally {
+        allowQueuedCancel.countDown()
+        queuedFinished.countDown()
+        first.cancelAndJoin()
+        queued.cancelAndJoin()
       }
     }
   }

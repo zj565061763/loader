@@ -73,6 +73,7 @@
 - `doMutate` 在 `FMutex.withLock` 内、执行 block 前再次检查 `ensureActive`，拦住 `withContext` 安装线程上下文期间发生的取消
 - 任务结束时在锁内清空等于自己的字段
 - `cancelAndJoin` 在锁内读取两个字段，全部取消后再一起等待
+- `cancelAndJoin` 必须先取消 `_job` 再取消 `_runningJob`，顺序不能调换：运行任务在 `Unconfined` 上时会在取消时内联结束，先取消它会让尚未取消的排队任务立即开始执行
 - `cancelAndJoin` 不能循环重试直到没有任务，否则单线程调度器上可能忙等卡死，也会误取消之后发起的加载
 - `_mutateMutex` 保护可能挂起的用户 block，并提供嵌套检测
 
@@ -99,11 +100,11 @@
 | 测试类 | 覆盖范围 |
 |---|---|
 | `LoaderTest` | 加载结果、取消、排队、多线程、嵌套和状态流 |
-| `LoaderCallbackTest` | `load` 与 `tryLoad` 的异常包装、子协程生命周期、线程上下文安装期间的取消和 Flow 上下文约束 |
+| `LoaderCallbackTest` | `load` 与 `tryLoad` 的异常包装、子协程生命周期、线程上下文安装期间的取消、回调内的嵌套调用和 Flow 上下文约束 |
 | `LoaderQueuedCleanupTest` | `load` 与 `tryLoad` 发起的任务在排队调用方取消或超时后仍保持忙状态和清理等待 |
 | `LoaderReferenceTest` | `load` 与 `tryLoad` 在成功、普通异常和取消异常退出后释放结果及异常数据，以及排队加载取消后的异常数据释放 |
-| `MutatorTest` | 已取消调用方的任务登记、已登记 `tryLoad` 的取消和替换、上下文探针的暂停位置，以及新任务登记后尚未发起取消时的排队任务替换、手动取消和忙状态 |
-| `MutexTest` | 互斥、锁释放、嵌套和 Flow 上下文约束 |
+| `MutatorTest` | 已取消调用方的任务登记、已登记 `tryLoad` 的取消和替换、上下文探针的暂停位置，新任务登记后尚未发起取消时的排队任务替换、手动取消和忙状态，以及 `cancelAndJoin` 的取消顺序 |
+| `MutexTest` | 互斥、锁释放、嵌套（含子协程）和 Flow 上下文约束 |
 
 ## 编码与发布约定
 

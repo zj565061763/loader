@@ -490,6 +490,21 @@ class LoaderCallbackTest(private val useTryLoad: Boolean) {
   }
 
   @Test
+  fun `test nested load in callback`() = runTest {
+    checkNestedCall { load { } }
+  }
+
+  @Test
+  fun `test nested tryLoad in callback`() = runTest {
+    checkNestedCall { tryLoad { } }
+  }
+
+  @Test
+  fun `test nested cancelAndJoin in callback`() = runTest {
+    checkNestedCall { cancelAndJoin() }
+  }
+
+  @Test
   fun `test emit in callback returns failure and releases loader`() = runTest {
     val loader = FLoader()
     var cause: Throwable? = null
@@ -530,6 +545,23 @@ class LoaderCallbackTest(private val useTryLoad: Boolean) {
 
   private suspend fun <T> FLoader.loadForTest(onLoad: suspend () -> T): Result<T> {
     return if (useTryLoad) tryLoad(onLoad) else load(onLoad)
+  }
+
+  private suspend fun checkNestedCall(nested: suspend FLoader.() -> Unit) {
+    val loader = FLoader()
+    var nestedCause: Throwable? = null
+
+    val result = loader.loadForTest {
+      nestedCause = runCatching { loader.nested() }.exceptionOrNull()
+      1
+    }
+
+    // 嵌套调用被拦截，不影响当前加载的结果
+    assertTrue(nestedCause is IllegalStateException)
+    assertEquals("Nested invoke", nestedCause?.message)
+    assertEquals(1, result.getOrThrow())
+    assertEquals(false, loader.isLoading())
+    assertEquals(2, loader.tryLoad { 2 }.getOrThrow())
   }
 
   private suspend fun TestScope.checkSwallowedCancellation(replace: Boolean) {
