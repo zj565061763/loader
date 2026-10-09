@@ -2,8 +2,6 @@ package com.sd.lib.loader
 
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.coroutineScope
-import kotlinx.coroutines.currentCoroutineContext
-import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -134,10 +132,7 @@ private class LoaderImpl : FLoader {
     return try {
       _stateFlow.update { it.copy(isLoading = true) }
       // 等待 onLoad 用当前上下文启动的子协程结束，让其异常也包装为 Result.failure
-      coroutineScope { onLoad() }.let { data ->
-        currentCoroutineContext().ensureActive()
-        Result.success(data)
-      }
+      Result.success(coroutineScope { onLoad() })
     } catch (e: Throwable) {
       if (e is CancellationException) throw e
       Result.failure(e)

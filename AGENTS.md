@@ -60,7 +60,6 @@
 - 已取消的调用方不能取消其他加载：`mutate` 进入时先检查 `ensureActive`，再取消上一个任务
 - `doLoad` 只把普通异常转换为 `Result.failure`；`CancellationException` 必须重新抛出，不能被包装或吞掉。公开的 `safeRunCatching` 也遵循相同规则
 - `doLoad` 必须用 `coroutineScope` 包裹 `onLoad`：`onLoad` 用当前上下文启动的子协程挂在这个 scope 上，否则子协程的普通异常会绕过 `Result.failure`，`isLoading` 也会在子协程结束前变为 `false`
-- `onLoad` 返回后、创建 `Result.success` 前再次调用 `currentCoroutineContext().ensureActive()`，作为防御性检查
 - `isLoading` 在调用 `onLoad` 前设为 `true`，并在 `finally` 中恢复为 `false`。重新加载时会依次更新为 `false`、`true`，但 `StateFlow` 可能合并快速更新，收集者不保证收到完整序列
 
 ### `FMutator`

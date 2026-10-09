@@ -47,7 +47,6 @@ internal class FMutator(
         (_job !== mutateJob).also { if (!it) _runningJob = mutateJob }
       }.also { replaced ->
         if (replaced) mutateJob.cancel(newReplaceCause())
-        mutateJob.ensureActive()
       }
 
       doMutate(block)
