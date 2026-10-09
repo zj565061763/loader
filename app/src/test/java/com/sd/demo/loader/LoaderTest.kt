@@ -2220,6 +2220,31 @@ class LoaderTest {
   }
 
   @Test(timeout = 10_000)
+  fun `test tryLoad from replaced caller finally on Unconfined`() = runTest {
+    val loader = FLoader()
+    val container = mutableListOf<String>()
+    var tryLoadCause: Throwable? = null
+    val firstJob = launch(Dispatchers.Unconfined) {
+      try {
+        loader.load { delay(Long.MAX_VALUE) }
+      } finally {
+        // 旧任务的清理在新 load 的取消调用内联执行，此时新 load 已登记但尚未执行，tryLoad 必须立即判忙
+        tryLoadCause = runCatching { loader.tryLoad { container.add("finally-tryLoad") } }.exceptionOrNull()
+      }
+    }.also { runCurrent() }
+
+    assertEquals(2, loader.load {
+      container.add("new-load")
+      2
+    }.getOrThrow())
+    assertTrue(tryLoadCause is FLoader.BusyCancellationException)
+    assertEquals(true, firstJob.isCompleted)
+    assertEquals(listOf("new-load"), container)
+    assertEquals(false, loader.isLoading())
+    assertEquals(1, loader.tryLoad { 1 }.getOrThrow())
+  }
+
+  @Test(timeout = 10_000)
   fun `test load from replaced queued caller finally on Unconfined`() = runTest {
     val loader = FLoader()
     val container = mutableListOf<String>()

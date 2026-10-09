@@ -11,6 +11,8 @@
 - **补充 `NonCancellable` 中调用 `load` 的说明**：在 `NonCancellable` 中调用 `load` 只是不会被调用方取消，仍会被 `cancelAndJoin()` 或新的 `load` 取消。
 - **补充跨 Loader 取消异常的传播说明**：在 `onLoad` 中调用其他 Loader 时，它被别处取消抛出的 `ManualCancellationException` 或 `ReplacedCancellationException` 会从当前 `load` 原样抛出，不代表当前 Loader 被取消。
 - **补充 `tryLoad` 繁忙判定的说明**：上一次加载取消后仍在清理时也算繁忙。
+- **修正 `tryLoad` 的说明**：`tryLoad` 不取消也不等待上一次加载，繁忙时立即抛出 `BusyCancellationException`，其余行为与 `load` 相同。
+- **补充嵌套检测失效的场景**：除 `runBlocking` 和新线程外，通过新的根协程作用域绕开原上下文时同样无法检测嵌套调用，可能导致死锁。
 
 ## 1.9.0
 

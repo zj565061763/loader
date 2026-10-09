@@ -43,7 +43,7 @@ interface FLoader {
    * 在[onLoad]中调用其他 Loader 时，它被别处取消抛出的[ManualCancellationException]或[ReplacedCancellationException]也会原样抛出，不代表当前 Loader 被取消。
    *
    * [onLoad]中不允许嵌套调用[load]、[tryLoad]或[cancelAndJoin]，未捕获的嵌套异常会包装为[Result.failure]。
-   * 嵌套检测依赖协程上下文，通过[runBlocking]或新线程绕开原上下文时无法检测，可能导致死锁。
+   * 嵌套检测依赖协程上下文，通过[runBlocking]、新线程或新的根协程作用域绕开原上下文时无法检测，可能导致死锁。
    *
    * 在`flow {}`中不能在[onLoad]内调用`emit`，否则返回[Result.failure]。
    * 请改用[channelFlow]，或在[onLoad]外`emit`。
@@ -53,7 +53,8 @@ interface FLoader {
   suspend fun <T> load(onLoad: suspend () -> T): Result<T>
 
   /**
-   * 功能与[load]相同，但加载繁忙时立即抛出[BusyCancellationException]，上一次加载取消后仍在清理时也算繁忙。
+   * 开始加载，但不取消也不等待上一次加载：加载繁忙时立即抛出[BusyCancellationException]，上一次加载取消后仍在清理时也算繁忙。
+   * 其余行为与[load]相同。
    *
    * [BusyCancellationException]是[CancellationException]的子类，不捕获会取消调用方协程。
    * 在加载回调中调用其他 Loader 的[tryLoad]时，后者抛出的忙异常也会向外传播。

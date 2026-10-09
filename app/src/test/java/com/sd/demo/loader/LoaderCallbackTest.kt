@@ -301,6 +301,67 @@ class LoaderCallbackTest(private val useTryLoad: Boolean) {
   }
 
   @Test
+  fun `test callback CancellationException cancels child with same cause and waits for cleanup`() = runTest {
+    val loader = FLoader()
+    val cause = CustomCancellationException(4)
+    val childStarted = CompletableDeferred<Unit>()
+    val cleanupStarted = CompletableDeferred<Unit>()
+    val releaseCleanup = CompletableDeferred<Unit>()
+    val container = mutableListOf<String>()
+    var childCause: Throwable? = null
+
+    loader.loadingFlow.test {
+      assertEquals(false, awaitItem())
+      val loading = async {
+        runCatching {
+          loader.loadForTest {
+            CoroutineScope(currentCoroutineContext()).launch {
+              try {
+                childStarted.complete(Unit)
+                awaitCancellation()
+              } catch (e: CancellationException) {
+                childCause = e
+                throw e
+              } finally {
+                withContext(NonCancellable) {
+                  cleanupStarted.complete(Unit)
+                  releaseCleanup.await()
+                }
+                container.add("child-cleaned")
+              }
+            }
+            childStarted.await()
+            throw cause
+          }
+        }.exceptionOrNull()
+      }.also { runCurrent() }
+
+      try {
+        assertEquals(true, awaitItem())
+        // 回调抛出的取消异常原样传给子协程，加载等子协程清理结束后才抛出
+        assertEquals(true, cleanupStarted.isCompleted)
+        assertSame(cause, childCause)
+        assertEquals(false, loading.isCompleted)
+        assertEquals(true, loader.isLoading())
+        assertEquals(emptyList<String>(), container)
+        assertTrue(runCatching { loader.tryLoad { 2 } }.exceptionOrNull() is FLoader.BusyCancellationException)
+        expectNoEvents()
+
+        releaseCleanup.complete(Unit)
+        assertSame(cause, loading.await())
+        assertEquals(false, loading.isCancelled)
+        assertEquals(listOf("child-cleaned"), container)
+        assertEquals(false, awaitItem())
+        assertEquals(false, loader.isLoading())
+      } finally {
+        releaseCleanup.complete(Unit)
+        loading.cancelAndJoin()
+      }
+    }
+    assertEquals(2, loader.tryLoad { 2 }.getOrThrow())
+  }
+
+  @Test
   fun `test cancelAndJoin waits for children after callback returns`() = runTest {
     checkChildCancellation(replace = false)
   }

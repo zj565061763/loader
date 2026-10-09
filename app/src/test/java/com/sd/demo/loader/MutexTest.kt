@@ -5,9 +5,11 @@ import com.sd.lib.loader.FMutex
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.async
 import kotlinx.coroutines.cancel
@@ -20,6 +22,7 @@ import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.joinAll
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
@@ -439,6 +442,33 @@ class MutexTest {
     assertFalse(exception is CancellationException)
     assertEquals("Nested invoke", exception?.message)
     assertEquals(2, mutex.withLock { 2 })
+  }
+
+  @Test(timeout = 10_000)
+  fun `test withLock nested in new root scope waits for lock`() = runTest {
+    val mutex = FMutex()
+    val container = mutableListOf<String>()
+    // 独立的根 scope 不继承上下文，嵌套检测失效，内层调用会等待锁而不是抛出 Nested invoke
+    val rootScope = CoroutineScope(StandardTestDispatcher(testScheduler))
+
+    try {
+      lateinit var inner: Deferred<Unit>
+      val exception = mutex.withLock {
+        container.add("outer-started")
+        inner = rootScope.async { mutex.withLock { container.add("inner") } }
+        // 持锁期间等待内层会自锁，用超时退出
+        runCatching { withTimeout(1_000) { inner.await() } }.exceptionOrNull()
+      }
+      assertEquals(true, exception is TimeoutCancellationException)
+      assertEquals(listOf("outer-started"), container)
+
+      // 外层释放锁后内层才执行
+      inner.await()
+      assertEquals(listOf("outer-started", "inner"), container)
+      assertEquals(2, mutex.withLock { 2 })
+    } finally {
+      rootScope.cancel()
+    }
   }
 
   @Test
