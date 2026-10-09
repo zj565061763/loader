@@ -128,6 +128,51 @@ class LoaderReferenceTest(private val useTryLoad: Boolean) {
     }
   }
 
+  @Test(timeout = 10_000)
+  fun `test replaced queued load releases callback capture`() {
+    assertReleased(FLoader()) {
+      coroutineScope {
+        val cleanupStarted = CompletableDeferred<Unit>()
+        val releaseCleanup = CompletableDeferred<Unit>()
+        val first = launch(start = CoroutineStart.UNDISPATCHED) {
+          loadForTest {
+            try {
+              awaitCancellation()
+            } finally {
+              withContext(NonCancellable) {
+                cleanupStarted.complete(Unit)
+                releaseCleanup.await()
+              }
+            }
+          }
+        }
+
+        try {
+          val capture = Any()
+          val queued = launch(start = CoroutineStart.UNDISPATCHED) {
+            runCatching { load { capture.hashCode() } }
+          }
+          cleanupStarted.await()
+          assertEquals(false, first.isCompleted)
+          assertEquals(false, queued.isCompleted)
+
+          // 排队加载被更新的 load 替换后，Loader 不能继续持有它的回调闭包
+          val latest = launch(start = CoroutineStart.UNDISPATCHED) {
+            runCatching { load { } }
+          }
+          queued.join()
+          assertEquals(false, latest.isCompleted)
+          releaseCleanup.complete(Unit)
+          latest.join()
+          capture
+        } finally {
+          releaseCleanup.complete(Unit)
+          first.join()
+        }
+      }
+    }
+  }
+
   // 运行中的加载被别处取消后，Loader 不能继续持有它的回调闭包
   private fun checkCancelledLoadReleasesCapture(replace: Boolean) {
     assertReleased(FLoader()) {

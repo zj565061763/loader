@@ -17,6 +17,7 @@ import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.joinAll
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.StandardTestDispatcher
@@ -626,6 +627,25 @@ class LoaderTest {
     loader.tryLoad { 2 }.also { result ->
       assertEquals(2, result.getOrThrow())
     }
+  }
+
+  @Test
+  fun `test tryLoad when busy does not cancel caller`() = runTest {
+    val loader = FLoader()
+    val job = launch {
+      loader.load { delay(Long.MAX_VALUE) }
+    }.also {
+      runCurrent()
+    }
+
+    val cause = runCatching { loader.tryLoad { 1 } }.exceptionOrNull()
+    // 忙异常只从 tryLoad 抛出，捕获后调用方协程仍处于活动状态
+    assertTrue(cause is FLoader.BusyCancellationException)
+    assertEquals(true, currentCoroutineContext().isActive)
+    assertEquals(true, loader.isLoading())
+
+    job.cancelAndJoin()
+    assertEquals(2, loader.tryLoad { 2 }.getOrThrow())
   }
 
   @Test

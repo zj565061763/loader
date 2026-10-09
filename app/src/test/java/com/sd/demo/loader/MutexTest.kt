@@ -12,6 +12,7 @@ import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.coroutineScope
@@ -644,6 +645,38 @@ class MutexTest {
       assertEquals(0, running.get())
       assertEquals(800, completed)
       assertEquals(1, mutex.withLock { 1 })
+    }
+  }
+
+  @Test(timeout = 10_000)
+  fun `test withLock mutually exclusive on Unconfined dispatcher`() = runTest {
+    withContext(Dispatchers.Unconfined) {
+      repeat(100) {
+        val mutex = FMutex()
+        val running = AtomicInteger()
+        val overlapped = AtomicBoolean()
+
+        // Unconfined 下释放锁时等待者会在持锁者线程上内联执行
+        coroutineScope {
+          List(8) {
+            async {
+              mutex.withLock {
+                if (running.incrementAndGet() != 1) overlapped.set(true)
+                try {
+                  yield()
+                  delay(1)
+                } finally {
+                  running.decrementAndGet()
+                }
+              }
+            }
+          }.awaitAll()
+        }
+
+        assertEquals(false, overlapped.get())
+        assertEquals(0, running.get())
+        assertEquals(1, mutex.withLock { 1 })
+      }
     }
   }
 
