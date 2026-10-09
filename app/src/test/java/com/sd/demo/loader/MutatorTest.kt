@@ -1,3 +1,6 @@
+// IDE 未识别跨模块 friendPaths，测试文件显式抑制内部成员的可见性诊断
+@file:Suppress("INVISIBLE_REFERENCE", "INVISIBLE_MEMBER")
+
 package com.sd.demo.loader
 
 import com.sd.lib.loader.FLoader
@@ -33,6 +36,51 @@ import kotlin.coroutines.cancellation.CancellationException
 class MutatorTest {
 
   private class CallerCancellationException(val code: Int) : CancellationException("caller cancelled: $code")
+
+  @Test(timeout = 10_000)
+  fun `test context probe pauses registered tryLoad before callback`() = runTest {
+    Executors.newSingleThreadExecutor().asCoroutineDispatcher().use { callerDispatcher ->
+      val loader = FLoader()
+      val callerPaused = CompletableDeferred<Unit>()
+      val releaseCaller = CountDownLatch(1)
+      val probePaused = AtomicBoolean()
+      val callbackEntered = AtomicBoolean()
+      val contextProbe = PauseOnRepeatedContextKey {
+        probePaused.set(true)
+        callerPaused.complete(Unit)
+        check(releaseCaller.await(5, TimeUnit.SECONDS))
+      }
+      val caller = async(callerDispatcher + contextProbe) {
+        contextProbe.arm()
+        try {
+          loader.tryLoad {
+            callbackEntered.set(true)
+            1
+          }
+        } finally {
+          // 探针未触发时也唤醒断言，避免测试只能超时
+          callerPaused.complete(Unit)
+        }
+      }
+
+      try {
+        callerPaused.await()
+        assertEquals(true, probePaused.get())
+        assertEquals(false, callbackEntered.get())
+        assertEquals(false, caller.isCompleted)
+        val busyCause = runCatching { loader.tryLoad { 2 } }.exceptionOrNull()
+        assertTrue(busyCause is FLoader.BusyCancellationException)
+      } finally {
+        releaseCaller.countDown()
+        caller.join()
+      }
+
+      assertEquals(1, caller.await().getOrThrow())
+      assertEquals(true, callbackEntered.get())
+      assertEquals(false, loader.isLoading())
+      assertEquals(3, loader.tryLoad { 3 }.getOrThrow())
+    }
+  }
 
   @Test(timeout = 10_000)
   fun `test already cancelled tryLoad does not make idle loader busy`() = runTest {

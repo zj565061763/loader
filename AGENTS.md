@@ -67,7 +67,9 @@
 - `mutate` 进入时在锁内把自己设为 `_job`，锁外取消上一个 `_job`，再等待进入时读到的 `_runningJob` 结束
 - 只有仍是 `_job` 的任务才能开始执行，并在同一次加锁中设为 `_runningJob`；否则说明有更新的任务进入，以 `newReplaceCause()` 取消自己。这条保证串行执行，不能去掉
 - 排队任务被取消后可能先于 `_runningJob` 结束，所以判断忙和等待时必须同时看两个字段，不能只看 `_job`
+- `mutateOrThrow` 进入时先检查 `ensureActive` 再登记任务，避免已取消的调用方让空闲的 Loader 短暂变忙
 - `mutateOrThrow` 在锁内判断：`_job` 或 `_runningJob` 未完成即为忙，否则把自己同时设为两者；它不取消也不等待任何任务
+- `doMutate` 在 `FMutex.withLock` 内、执行 block 前再次检查 `ensureActive`，拦住 `withContext` 安装线程上下文期间发生的取消
 - 任务结束时在锁内清空等于自己的字段
 - `cancelAndJoin` 在锁内读取两个字段，全部取消后再一起等待
 - `cancelAndJoin` 不能循环重试直到没有任务，否则单线程调度器上可能忙等卡死，也会误取消之后发起的加载
@@ -85,6 +87,7 @@
 
 - 库的 JVM 单元测试统一放在 `:app`，因为 `:lib` 没有配置测试依赖
 - `:app` 单元测试通过 `friendPaths` 访问同一构建变体的 `:lib` 内部成员
+- `MutatorTest` 显式抑制 `INVISIBLE_REFERENCE` 和 `INVISIBLE_MEMBER`，兼容 IDE 未识别跨模块友元关系的分析
 - 测试使用 `kotlinx-coroutines-test` 的 `runTest`、`runCurrent`、`advanceUntilIdle`，Flow 断言使用 Turbine
 - 测试方法名使用反引号包裹的英文句子，例如 ``fun `test load when loading`() = runTest { ... }``
 - 跨协程边界验证异常原始实例时使用带业务字段的异常，避免调试模式的堆栈恢复复制异常
@@ -98,7 +101,7 @@
 | `LoaderCallbackTest` | `load` 与 `tryLoad` 的异常包装、子协程生命周期、线程上下文安装期间的取消和 Flow 上下文约束 |
 | `LoaderQueuedCleanupTest` | `load` 与 `tryLoad` 发起的任务在排队调用方取消后仍保持忙状态和清理等待 |
 | `LoaderReferenceTest` | `load` 与 `tryLoad` 在成功、普通异常和取消异常退出后释放结果及异常数据，以及排队加载取消后的异常数据释放 |
-| `MutatorTest` | 已取消调用方的任务登记，以及新任务登记后尚未发起取消时的排队任务替换、手动取消和忙状态 |
+| `MutatorTest` | 已取消调用方的任务登记、上下文探针的暂停位置，以及新任务登记后尚未发起取消时的排队任务替换、手动取消和忙状态 |
 | `MutexTest` | 互斥、锁释放、嵌套和 Flow 上下文约束 |
 
 ## 编码与发布约定
