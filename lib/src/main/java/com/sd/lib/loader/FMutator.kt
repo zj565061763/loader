@@ -9,9 +9,9 @@ import kotlinx.coroutines.joinAll
 
 internal class FMutator(
   /** 创建[cancelAndJoin]取消任务的异常 */
-  private val newCancelCause: () -> CancellationException?,
+  private val newCancelCause: () -> CancellationException,
   /** 创建替换任务时取消旧任务的异常 */
-  private val newReplaceCause: () -> CancellationException?,
+  private val newReplaceCause: () -> CancellationException,
   /** 创建[mutateOrThrow]繁忙时抛出的异常 */
   private val newBusyCause: () -> CancellationException,
 ) {
