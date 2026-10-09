@@ -2,7 +2,9 @@ package com.sd.demo.loader
 
 import com.sd.lib.loader.FLoader
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.coroutineScope
@@ -130,6 +132,34 @@ class LoaderReferenceTest(private val useTryLoad: Boolean) {
 
   @Test(timeout = 10_000)
   fun `test replaced queued load releases callback capture`() {
+    checkCancelledQueuedLoadReleasesCapture { loader, queued ->
+      val latest = launch(start = CoroutineStart.UNDISPATCHED) {
+        runCatching { loader.load { } }
+      }
+      queued.join()
+      assertEquals(false, latest.isCompleted)
+    }
+  }
+
+  @Test(timeout = 10_000)
+  fun `test manually cancelled queued load releases callback capture`() {
+    checkCancelledQueuedLoadReleasesCapture { loader, queued ->
+      val cancelling = launch(start = CoroutineStart.UNDISPATCHED) { loader.cancelAndJoin() }
+      queued.join()
+      assertEquals(false, cancelling.isCompleted)
+    }
+  }
+
+  @Test(timeout = 10_000)
+  fun `test cancelled queued load releases callback capture`() {
+    checkCancelledQueuedLoadReleasesCapture { _, queued ->
+      queued.cancel(PayloadCancellationException(Any()))
+      queued.join()
+    }
+  }
+
+  // 排队加载被替换、被 cancelAndJoin 取消或被调用方取消后，Loader 不能继续持有它的回调闭包
+  private fun checkCancelledQueuedLoadReleasesCapture(cancelQueued: suspend CoroutineScope.(loader: FLoader, queued: Job) -> Unit) {
     assertReleased(FLoader()) {
       coroutineScope {
         val cleanupStarted = CompletableDeferred<Unit>()
@@ -156,14 +186,9 @@ class LoaderReferenceTest(private val useTryLoad: Boolean) {
           assertEquals(false, first.isCompleted)
           assertEquals(false, queued.isCompleted)
 
-          // 排队加载被更新的 load 替换后，Loader 不能继续持有它的回调闭包
-          val latest = launch(start = CoroutineStart.UNDISPATCHED) {
-            runCatching { load { } }
-          }
-          queued.join()
-          assertEquals(false, latest.isCompleted)
-          releaseCleanup.complete(Unit)
-          latest.join()
+          cancelQueued(this@assertReleased, queued)
+          assertEquals(true, queued.isCompleted)
+          assertEquals(false, first.isCompleted)
           capture
         } finally {
           releaseCleanup.complete(Unit)

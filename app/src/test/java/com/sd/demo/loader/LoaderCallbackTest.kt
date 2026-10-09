@@ -12,14 +12,17 @@ import kotlinx.coroutines.ThreadContextElement
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitCancellation
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.channelFlow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.advanceTimeBy
+import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.withContext
@@ -159,6 +162,45 @@ class LoaderCallbackTest(private val useTryLoad: Boolean) {
       }
     } finally {
       releaseChild.complete(Unit)
+    }
+    assertEquals(2, loader.tryLoad { 2 }.getOrThrow())
+  }
+
+  @Test
+  fun `test detached coroutine does not extend load`() = runTest {
+    val loader = FLoader()
+    val releaseChild = CompletableDeferred<Unit>()
+    val container = mutableListOf<String>()
+    // 独立的根 scope 不继承当前上下文，启动的协程不挂在加载上
+    val detachedScope = CoroutineScope(StandardTestDispatcher(testScheduler))
+
+    try {
+      loader.loadingFlow.test {
+        assertEquals(false, awaitItem())
+        val result = loader.loadForTest {
+          detachedScope.launch {
+            releaseChild.await()
+            container.add("detached-finished")
+          }
+          container.add("callback-returned")
+          1
+        }
+
+        // 回调返回后加载立即结束，不等待独立协程
+        assertEquals(1, result.getOrThrow())
+        assertEquals(listOf("callback-returned"), container)
+        assertEquals(true, awaitItem())
+        assertEquals(false, awaitItem())
+        assertEquals(false, loader.isLoading())
+
+        releaseChild.complete(Unit)
+        advanceUntilIdle()
+        assertEquals(listOf("callback-returned", "detached-finished"), container)
+        expectNoEvents()
+      }
+    } finally {
+      releaseChild.complete(Unit)
+      detachedScope.cancel()
     }
     assertEquals(2, loader.tryLoad { 2 }.getOrThrow())
   }

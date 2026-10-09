@@ -1199,12 +1199,22 @@ class LoaderTest {
 
   @Test
   fun `test load waits for previous load cleanup when its caller cancelled`() = runTest {
-    checkLoadAfterCallerCancelledCleanup(useTryLoad = false)
+    checkLoadAfterCallerCancelledCleanup(useTryLoad = false, cancel = false)
   }
 
   @Test
   fun `test load waits for previous tryLoad cleanup when its caller cancelled`() = runTest {
-    checkLoadAfterCallerCancelledCleanup(useTryLoad = true)
+    checkLoadAfterCallerCancelledCleanup(useTryLoad = true, cancel = false)
+  }
+
+  @Test
+  fun `test cancelAndJoin waits for previous load cleanup when its caller cancelled`() = runTest {
+    checkLoadAfterCallerCancelledCleanup(useTryLoad = false, cancel = true)
+  }
+
+  @Test
+  fun `test cancelAndJoin waits for previous tryLoad cleanup when its caller cancelled`() = runTest {
+    checkLoadAfterCallerCancelledCleanup(useTryLoad = true, cancel = true)
   }
 
   @Test
@@ -1374,6 +1384,8 @@ class LoaderTest {
         val running = AtomicInteger()
         val started = AtomicInteger()
         val overlapped = AtomicBoolean()
+        val loadCauses = ConcurrentLinkedQueue<CancellationException>()
+        val tryLoadCauses = ConcurrentLinkedQueue<CancellationException>()
         val onLoad: suspend () -> Unit = {
           if (running.incrementAndGet() != 1) overlapped.set(true)
           started.incrementAndGet()
@@ -1390,8 +1402,8 @@ class LoaderTest {
               start.await()
               try {
                 loader.load(onLoad).getOrThrow()
-              } catch (_: CancellationException) {
-                // 被后续任务取消属于预期行为
+              } catch (e: CancellationException) {
+                loadCauses.add(e)
               }
             }
           }
@@ -1400,8 +1412,8 @@ class LoaderTest {
               start.await()
               try {
                 loader.tryLoad(onLoad).getOrThrow()
-              } catch (_: CancellationException) {
-                // 忙状态或被后续任务取消属于预期行为
+              } catch (e: CancellationException) {
+                tryLoadCauses.add(e)
               }
             }
           }
@@ -1415,6 +1427,14 @@ class LoaderTest {
         assertEquals(0, running.get())
         assertEquals(true, started.get() > 0)
         assertEquals(false, loader.isLoading())
+        // load 只会被后续任务替换，tryLoad 还可能判忙
+        loadCauses.forEach { cause ->
+          assertTrue("unexpected load cause: $cause", cause is FLoader.ReplacedCancellationException)
+        }
+        tryLoadCauses.forEach { cause ->
+          val expected = cause is FLoader.ReplacedCancellationException || cause is FLoader.BusyCancellationException
+          assertTrue("unexpected tryLoad cause: $cause", expected)
+        }
       }
     }
   }
@@ -1428,6 +1448,8 @@ class LoaderTest {
         val failures = AtomicInteger()
         val running = AtomicInteger()
         val overlapped = AtomicBoolean()
+        val loadCauses = ConcurrentLinkedQueue<CancellationException>()
+        val tryLoadCauses = ConcurrentLinkedQueue<CancellationException>()
         val onLoad: suspend () -> Unit = {
           if (running.incrementAndGet() != 1) overlapped.set(true)
           try {
@@ -1442,13 +1464,14 @@ class LoaderTest {
           List(8) { index ->
             async {
               start.await()
+              val useTryLoad = index % 2 == 0
               try {
-                val result = if (index % 2 == 0) loader.tryLoad(onLoad) else loader.load(onLoad)
+                val result = if (useTryLoad) loader.tryLoad(onLoad) else loader.load(onLoad)
                 // 执行到的任务只能以 Result.failure 结束
                 assertTrue(result.exceptionOrNull() is BusinessException)
                 failures.incrementAndGet()
-              } catch (_: CancellationException) {
-                // 忙状态或被后续任务取消属于预期行为
+              } catch (e: CancellationException) {
+                if (useTryLoad) tryLoadCauses.add(e) else loadCauses.add(e)
               }
             }
           }.also { jobs ->
@@ -1463,6 +1486,14 @@ class LoaderTest {
         assertEquals(0, running.get())
         assertEquals(false, loader.isLoading())
         assertEquals(1, loader.tryLoad { 1 }.getOrThrow())
+        // load 只会被后续任务替换，tryLoad 还可能判忙
+        loadCauses.forEach { cause ->
+          assertTrue("unexpected load cause: $cause", cause is FLoader.ReplacedCancellationException)
+        }
+        tryLoadCauses.forEach { cause ->
+          val expected = cause is FLoader.ReplacedCancellationException || cause is FLoader.BusyCancellationException
+          assertTrue("unexpected tryLoad cause: $cause", expected)
+        }
       }
     }
   }
@@ -2314,32 +2345,35 @@ class LoaderTest {
   }
 
   @Test(timeout = 10_000)
-  fun `test concurrent load on Unconfined dispatcher`() = runTest {
+  fun `test concurrent load and tryLoad on Unconfined dispatcher`() = runTest {
     withContext(Dispatchers.Unconfined) {
       repeat(100) {
         val loader = FLoader()
         val running = AtomicInteger()
         val started = AtomicInteger()
         val overlapped = AtomicBoolean()
-        val causes = ConcurrentLinkedQueue<CancellationException>()
+        val loadCauses = ConcurrentLinkedQueue<CancellationException>()
+        val tryLoadCauses = ConcurrentLinkedQueue<CancellationException>()
+        val onLoad: suspend () -> Unit = {
+          if (running.incrementAndGet() != 1) overlapped.set(true)
+          started.incrementAndGet()
+          try {
+            yield()
+            delay(1)
+          } finally {
+            running.decrementAndGet()
+          }
+        }
 
-        // Unconfined 下被取消任务的清理会在 load 调用线程上内联执行
+        // Unconfined 下被取消任务的清理会在 load 调用线程上内联执行，tryLoad 的登记与之交错
         coroutineScope {
-          List(8) {
+          List(8) { index ->
             async {
+              val useTryLoad = index % 2 == 0
               try {
-                loader.load {
-                  if (running.incrementAndGet() != 1) overlapped.set(true)
-                  started.incrementAndGet()
-                  try {
-                    yield()
-                    delay(1)
-                  } finally {
-                    running.decrementAndGet()
-                  }
-                }.getOrThrow()
+                if (useTryLoad) loader.tryLoad(onLoad).getOrThrow() else loader.load(onLoad).getOrThrow()
               } catch (e: CancellationException) {
-                causes.add(e)
+                if (useTryLoad) tryLoadCauses.add(e) else loadCauses.add(e)
               }
             }
           }.awaitAll()
@@ -2348,8 +2382,12 @@ class LoaderTest {
         assertEquals(false, overlapped.get())
         assertEquals(0, running.get())
         assertEquals(true, started.get() > 0)
-        causes.forEach { cause ->
-          assertTrue("unexpected cause: $cause", cause is FLoader.ReplacedCancellationException)
+        loadCauses.forEach { cause ->
+          assertTrue("unexpected load cause: $cause", cause is FLoader.ReplacedCancellationException)
+        }
+        tryLoadCauses.forEach { cause ->
+          val expected = cause is FLoader.ReplacedCancellationException || cause is FLoader.BusyCancellationException
+          assertTrue("unexpected tryLoad cause: $cause", expected)
         }
         assertEquals(false, loader.isLoading())
         assertEquals(1, loader.tryLoad { 1 }.getOrThrow())
@@ -2702,7 +2740,7 @@ class LoaderTest {
   }
 
   // load 与 tryLoad 的登记路径不同，需分别验证调用方取消后仍占住 Loader 直到清理结束
-  private suspend fun TestScope.checkLoadAfterCallerCancelledCleanup(useTryLoad: Boolean) {
+  private suspend fun TestScope.checkLoadAfterCallerCancelledCleanup(useTryLoad: Boolean, cancel: Boolean) {
     val loader = FLoader()
     val cause = CustomCancellationException()
     val releaseCleanup = CompletableDeferred<Unit>()
@@ -2733,11 +2771,17 @@ class LoaderTest {
       assertEquals(false, firstJob.isCompleted)
       assertEquals(true, loader.isLoading())
 
-      // 调用方已取消但旧任务仍在清理，新的 load 必须等待，tryLoad 立即判忙
+      // 调用方已取消但旧任务仍在清理，新的 load 和 cancelAndJoin 必须等待，tryLoad 立即判忙
       val nextJob = async {
-        loader.load {
-          container.add("new-load")
+        if (cancel) {
+          loader.cancelAndJoin()
+          container.add("cancel-finished")
           2
+        } else {
+          loader.load {
+            container.add("new-load")
+            2
+          }.getOrThrow()
         }
       }.also { runCurrent() }
       assertEquals(false, nextJob.isCompleted)
@@ -2745,12 +2789,12 @@ class LoaderTest {
       assertTrue(runCatching { loader.tryLoad { 3 } }.exceptionOrNull() is FLoader.BusyCancellationException)
 
       releaseCleanup.complete(Unit)
-      assertEquals(2, nextJob.await().getOrThrow())
+      assertEquals(2, nextJob.await())
       firstJob.join()
-      // 先被调用方取消再被新的 load 替换的加载保留调用方的取消原因
+      // 先被调用方取消再被新的 load 替换或被 cancelAndJoin 取消的加载保留调用方的取消原因
       assertSame(cause, loadException)
       assertEquals(true, firstJob.isCancelled)
-      assertEquals(listOf("old-cleaned", "new-load"), container)
+      assertEquals(if (cancel) listOf("old-cleaned", "cancel-finished") else listOf("old-cleaned", "new-load"), container)
       assertEquals(false, loader.isLoading())
       assertEquals(3, loader.tryLoad { 3 }.getOrThrow())
     } finally {
