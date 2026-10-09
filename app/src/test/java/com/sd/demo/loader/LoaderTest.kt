@@ -258,6 +258,16 @@ class LoaderTest {
   }
 
   @Test
+  fun `test load when throw other CancellationException after replaced`() = runTest {
+    checkOtherCancellationAfterCancelled(replace = true)
+  }
+
+  @Test
+  fun `test load when throw other CancellationException after cancelAndJoin`() = runTest {
+    checkOtherCancellationAfterCancelled(replace = false)
+  }
+
+  @Test
   fun `test load when cancel`() = runTest {
     val loader = FLoader()
     var container = ""
@@ -1165,6 +1175,16 @@ class LoaderTest {
     assertEquals("13", container)
     assertEquals(startTime + 1000, currentTime)
     assertEquals(false, loader.isLoading())
+  }
+
+  @Test
+  fun `test load waits for previous load cleanup when its caller cancelled`() = runTest {
+    checkLoadAfterCallerCancelledCleanup(useTryLoad = false)
+  }
+
+  @Test
+  fun `test load waits for previous tryLoad cleanup when its caller cancelled`() = runTest {
+    checkLoadAfterCallerCancelledCleanup(useTryLoad = true)
   }
 
   @Test
@@ -2579,6 +2599,93 @@ class LoaderTest {
     assertEquals(false, otherLoader.isLoading())
     assertEquals(3, loader.tryLoad { 3 }.getOrThrow())
     assertEquals(4, otherLoader.tryLoad { 4 }.getOrThrow())
+  }
+
+  private suspend fun TestScope.checkOtherCancellationAfterCancelled(replace: Boolean) {
+    val loader = FLoader()
+    var exceptionInBlock: Throwable? = null
+    val job = async {
+      runCatching {
+        loader.load {
+          try {
+            delay(Long.MAX_VALUE)
+          } catch (e: CancellationException) {
+            exceptionInBlock = e
+            throw CustomCancellationException(2)
+          }
+        }
+      }.exceptionOrNull()
+    }.also { runCurrent() }
+
+    if (replace) {
+      loader.load { 2 }.also { assertEquals(2, it.getOrThrow()) }
+    } else {
+      loader.cancelAndJoin()
+    }
+
+    // 取消后 onLoad 抛出其他取消异常，仍保留最先的取消原因
+    val expectedType = if (replace) FLoader.ReplacedCancellationException::class else FLoader.ManualCancellationException::class
+    assertEquals(expectedType, exceptionInBlock!!::class)
+    assertEquals(expectedType, job.await()!!::class)
+    assertEquals(false, loader.isLoading())
+    assertEquals(3, loader.tryLoad { 3 }.getOrThrow())
+  }
+
+  // load 与 tryLoad 的登记路径不同，需分别验证调用方取消后仍占住 Loader 直到清理结束
+  private suspend fun TestScope.checkLoadAfterCallerCancelledCleanup(useTryLoad: Boolean) {
+    val loader = FLoader()
+    val cause = CustomCancellationException()
+    val releaseCleanup = CompletableDeferred<Unit>()
+    val container = mutableListOf<String>()
+    var exceptionInBlock: Throwable? = null
+    var loadException: Throwable? = null
+    val onLoad: suspend () -> Unit = {
+      try {
+        delay(Long.MAX_VALUE)
+      } catch (e: CancellationException) {
+        exceptionInBlock = e
+        throw e
+      } finally {
+        withContext(NonCancellable) { releaseCleanup.await() }
+        container.add("old-cleaned")
+      }
+    }
+    val firstJob = launch {
+      loadException = runCatching {
+        if (useTryLoad) loader.tryLoad(onLoad) else loader.load(onLoad)
+      }.exceptionOrNull()
+    }.also { runCurrent() }
+
+    try {
+      firstJob.cancel(cause)
+      runCurrent()
+      assertSame(cause, exceptionInBlock)
+      assertEquals(false, firstJob.isCompleted)
+      assertEquals(true, loader.isLoading())
+
+      // 调用方已取消但旧任务仍在清理，新的 load 必须等待，tryLoad 立即判忙
+      val nextJob = async {
+        loader.load {
+          container.add("new-load")
+          2
+        }
+      }.also { runCurrent() }
+      assertEquals(false, nextJob.isCompleted)
+      assertEquals(emptyList<String>(), container)
+      assertTrue(runCatching { loader.tryLoad { 3 } }.exceptionOrNull() is FLoader.BusyCancellationException)
+
+      releaseCleanup.complete(Unit)
+      assertEquals(2, nextJob.await().getOrThrow())
+      firstJob.join()
+      // 先被调用方取消再被新的 load 替换的加载保留调用方的取消原因
+      assertSame(cause, loadException)
+      assertEquals(true, firstJob.isCancelled)
+      assertEquals(listOf("old-cleaned", "new-load"), container)
+      assertEquals(false, loader.isLoading())
+      assertEquals(3, loader.tryLoad { 3 }.getOrThrow())
+    } finally {
+      releaseCleanup.complete(Unit)
+    }
   }
 
   // load 与 tryLoad 的登记路径不同，需分别验证 NonCancellable 内仍会被取消

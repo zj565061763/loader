@@ -62,6 +62,16 @@ class LoaderReferenceTest(private val useTryLoad: Boolean) {
   }
 
   @Test(timeout = 10_000)
+  fun `test replaced load releases callback capture`() {
+    checkCancelledLoadReleasesCapture(replace = true)
+  }
+
+  @Test(timeout = 10_000)
+  fun `test manually cancelled load releases callback capture`() {
+    checkCancelledLoadReleasesCapture(replace = false)
+  }
+
+  @Test(timeout = 10_000)
   fun `test failed load releases exception payload`() {
     assertReleased(FLoader()) {
       val cause = loadForTest<Any> { throw PayloadException(Any()) }.exceptionOrNull() as PayloadException
@@ -114,6 +124,26 @@ class LoaderReferenceTest(private val useTryLoad: Boolean) {
           releaseCleanup.complete(Unit)
           first.join()
         }
+      }
+    }
+  }
+
+  // 运行中的加载被别处取消后，Loader 不能继续持有它的回调闭包
+  private fun checkCancelledLoadReleasesCapture(replace: Boolean) {
+    assertReleased(FLoader()) {
+      coroutineScope {
+        val capture = Any()
+        val first = launch(start = CoroutineStart.UNDISPATCHED) {
+          runCatching {
+            loadForTest {
+              capture.hashCode()
+              awaitCancellation()
+            }
+          }
+        }
+        if (replace) load { }.getOrThrow() else cancelAndJoin()
+        first.join()
+        capture
       }
     }
   }
