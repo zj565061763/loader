@@ -632,6 +632,21 @@ class LoaderCallbackTest(private val useTryLoad: Boolean) {
     checkNestedCall { cancelAndJoin() }
   }
 
+  @Test(timeout = 10_000)
+  fun `test load replaces outer load after nested load in callback`() = runTest {
+    checkReplacementAfterNestedCall { load { } }
+  }
+
+  @Test(timeout = 10_000)
+  fun `test load replaces outer load after nested tryLoad in callback`() = runTest {
+    checkReplacementAfterNestedCall { tryLoad { } }
+  }
+
+  @Test(timeout = 10_000)
+  fun `test load replaces outer load after nested cancelAndJoin in callback`() = runTest {
+    checkReplacementAfterNestedCall { cancelAndJoin() }
+  }
+
   @Test
   fun `test emit in callback returns failure and releases loader`() = runTest {
     val loader = FLoader()
@@ -690,6 +705,29 @@ class LoaderCallbackTest(private val useTryLoad: Boolean) {
     assertEquals(1, result.getOrThrow())
     assertEquals(false, loader.isLoading())
     assertEquals(2, loader.tryLoad { 2 }.getOrThrow())
+  }
+
+  // 回归时新的 load 会一直等待未被取消的外层加载，调用处用超时让测试失败而不是卡住
+  private suspend fun TestScope.checkReplacementAfterNestedCall(nested: suspend FLoader.() -> Unit) {
+    val loader = FLoader()
+    var nestedCause: Throwable? = null
+    val outerJob = async {
+      runCatching {
+        loader.loadForTest {
+          nestedCause = runCatching { loader.nested() }.exceptionOrNull()
+          awaitCancellation()
+        }
+      }.exceptionOrNull()
+    }.also { runCurrent() }
+    assertTrue(nestedCause is IllegalStateException)
+    assertEquals(false, outerJob.isCompleted)
+    assertEquals(true, loader.isLoading())
+
+    // 被拦截的嵌套调用不能改动任务登记，之后的 load 仍须能替换外层加载
+    assertEquals(2, loader.load { 2 }.getOrThrow())
+    assertTrue(outerJob.await() is FLoader.ReplacedCancellationException)
+    assertEquals(false, loader.isLoading())
+    assertEquals(3, loader.tryLoad { 3 }.getOrThrow())
   }
 
   private suspend fun TestScope.checkSwallowedCancellation(replace: Boolean) {

@@ -19,6 +19,7 @@ import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.joinAll
@@ -1117,6 +1118,23 @@ class LoaderTest {
 
     job.cancelAndJoin()
     assertEquals("1", container)
+  }
+
+  // 回归时新的 load 会一直等待未被取消的旧任务，用超时让测试失败而不是卡住
+  @Test(timeout = 10_000)
+  fun `test load replaces running load after busy tryLoad`() = runTest {
+    val loader = FLoader()
+    val firstJob = async {
+      runCatching { loader.load { delay(Long.MAX_VALUE) } }.exceptionOrNull()
+    }.also { runCurrent() }
+
+    assertTrue(runCatching { loader.tryLoad { 1 } }.exceptionOrNull() is FLoader.BusyCancellationException)
+    assertEquals(false, firstJob.isCompleted)
+
+    // 判忙的 tryLoad 不能改动任务登记，之后的 load 仍须能替换运行中的加载
+    assertEquals(2, loader.load { 2 }.getOrThrow())
+    assertTrue(firstJob.await() is FLoader.ReplacedCancellationException)
+    assertEquals(false, loader.isLoading())
   }
 
   @Test
@@ -2278,6 +2296,9 @@ class LoaderTest {
       val cancelJob = launch { loader.cancelAndJoin() }.also { runCurrent() }
       assertEquals(false, cancelJob.isCompleted)
 
+      // 排队任务已被取消但尚未退出，旧任务也已结束，tryLoad 仍须判忙
+      assertTrue(runCatching { loader.tryLoad { 2 } }.exceptionOrNull() is FLoader.BusyCancellationException)
+
       // 排队任务恢复后发现自己已被取消，不能执行回调
       queuedScheduler.runCurrent()
       runCurrent()
@@ -2286,6 +2307,54 @@ class LoaderTest {
       assertEquals(true, cancelJob.isCompleted)
       assertEquals(false, loader.isLoading())
       assertEquals(1, loader.tryLoad { 1 }.getOrThrow())
+    } finally {
+      queuedScheduler.runCurrent()
+      runCurrent()
+    }
+  }
+
+  // 回归时新的 load 会一直等待停在恢复前的排队任务，用超时让测试失败而不是卡住
+  @Test(timeout = 10_000)
+  fun `test load does not wait for replaced queued load to exit`() = runTest {
+    val loader = FLoader()
+    val queuedScheduler = TestCoroutineScheduler()
+    val queuedDispatcher = StandardTestDispatcher(queuedScheduler)
+    val container = mutableListOf<String>()
+    launch {
+      loader.load {
+        try {
+          delay(Long.MAX_VALUE)
+        } finally {
+          withContext(NonCancellable) { delay(1000) }
+          container.add("old-cleaned")
+        }
+      }
+    }.also { runCurrent() }
+
+    // 使用独立调度器，让被替换的排队任务停在恢复前
+    val queuedJob = async(queuedDispatcher + queuedScheduler) {
+      runCatching { loader.load { container.add("queued-load") } }.exceptionOrNull()
+    }
+    try {
+      queuedScheduler.runCurrent()
+      runCurrent()
+      assertEquals(false, queuedJob.isCompleted)
+
+      val startTime = currentTime
+      assertEquals(2, loader.load {
+        container.add("new-load")
+        2
+      }.getOrThrow())
+      // 新的 load 只等旧任务清理，不等被它取消的排队任务退出
+      assertEquals(false, queuedJob.isCompleted)
+      assertEquals(listOf("old-cleaned", "new-load"), container)
+      assertEquals(startTime + 1000, currentTime)
+      assertEquals(3, loader.tryLoad { 3 }.getOrThrow())
+
+      queuedScheduler.runCurrent()
+      assertTrue(queuedJob.await() is FLoader.ReplacedCancellationException)
+      assertEquals(listOf("old-cleaned", "new-load"), container)
+      assertEquals(false, loader.isLoading())
     } finally {
       queuedScheduler.runCurrent()
       runCurrent()
@@ -2868,6 +2937,12 @@ class LoaderTest {
       assertEquals(FLoader.State(isLoading = true), loader.stateFlow.value)
     }.getOrThrow()
     assertEquals(FLoader.State(isLoading = false), loader.stateFlow.value)
+  }
+
+  @Test
+  fun `test stateFlow is read only`() {
+    // 对外只读，不能强转成 MutableStateFlow 修改状态
+    assertEquals(false, FLoader().stateFlow is MutableStateFlow<*>)
   }
 
   @Test
