@@ -175,8 +175,8 @@ class LoaderCallbackTest(private val useTryLoad: Boolean) {
     val cleanupStarted = CompletableDeferred<Unit>()
     val releaseCleanup = CompletableDeferred<Unit>()
 
-    try {
-      loader.loadingFlow.test {
+    loader.loadingFlow.test {
+      try {
         assertEquals(false, awaitItem())
         val loading = async {
           loader.loadForTest {
@@ -212,10 +212,11 @@ class LoaderCallbackTest(private val useTryLoad: Boolean) {
         assertSame(cause, loading.await().exceptionOrNull())
         assertEquals(false, awaitItem())
         assertEquals(false, loader.isLoading())
+      } finally {
+        // 在 test 等待子协程结束前释放清理信号
+        failChild.complete(Unit)
+        releaseCleanup.complete(Unit)
       }
-    } finally {
-      failChild.complete(Unit)
-      releaseCleanup.complete(Unit)
     }
     assertEquals(2, loader.tryLoad { 2 }.getOrThrow())
   }
