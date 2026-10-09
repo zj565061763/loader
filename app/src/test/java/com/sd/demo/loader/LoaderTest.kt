@@ -17,6 +17,7 @@ import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.joinAll
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.TestCoroutineScheduler
@@ -27,8 +28,10 @@ import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.yield
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -37,6 +40,7 @@ import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicReference
 import kotlin.coroutines.cancellation.CancellationException
+import kotlin.random.Random
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class LoaderTest {
@@ -94,6 +98,31 @@ class LoaderTest {
 
     // 子协程的普通异常包装为 Result.failure，不会直接抛出
     assertSame(cause, job.await().exceptionOrNull())
+    assertEquals(false, loader.isLoading())
+  }
+
+  @Test
+  fun `test load when result is null`() = runTest {
+    val loader = FLoader()
+    assertNull(loader.load<String?> { null }.getOrThrow())
+    assertNull(loader.tryLoad<String?> { null }.getOrThrow())
+    assertEquals(false, loader.isLoading())
+  }
+
+  @Test
+  fun `test load when withTimeoutOrNull in block`() = runTest {
+    val loader = FLoader()
+    val job = async {
+      loader.load {
+        withTimeoutOrNull(100) { delay(Long.MAX_VALUE) }
+      }
+    }.also {
+      runCurrent()
+    }
+
+    advanceUntilIdle()
+    // 超时返回 null 并包装为 Result.success，不像 withTimeout 那样抛出异常
+    assertNull(job.await().getOrThrow())
     assertEquals(false, loader.isLoading())
   }
 
@@ -695,6 +724,16 @@ class LoaderTest {
   }
 
   @Test
+  fun `test load other loader in block when other loader cancelled by cancelAndJoin`() = runTest {
+    checkOtherLoaderCancelledInBlock(replace = false)
+  }
+
+  @Test
+  fun `test load other loader in block when other loader cancelled by new load`() = runTest {
+    checkOtherLoaderCancelledInBlock(replace = true)
+  }
+
+  @Test
   fun `test tryLoad busy from other loader propagates`() = runTest {
     val loader = FLoader()
     val otherLoader = FLoader()
@@ -1127,6 +1166,72 @@ class LoaderTest {
         assertEquals(0, running.get())
         assertEquals(true, started.get() > 0)
         assertEquals(false, loader.isLoading())
+      }
+    }
+  }
+
+  @Test(timeout = 60_000)
+  fun `test concurrent load with random caller cancellation on multiple threads`() = runTest {
+    withContext(Dispatchers.Default) {
+      repeat(200) { round ->
+        val loader = FLoader()
+        val start = CompletableDeferred<Unit>()
+        val running = AtomicInteger()
+        val overlapped = AtomicBoolean()
+        val causes = ConcurrentLinkedQueue<CancellationException>()
+        val onLoad: suspend () -> Unit = {
+          if (running.incrementAndGet() != 1) overlapped.set(true)
+          try {
+            yield()
+          } finally {
+            running.decrementAndGet()
+          }
+        }
+
+        coroutineScope {
+          val callerJobs = List(12) { index ->
+            launch {
+              start.await()
+              try {
+                if (index % 3 == 0) loader.tryLoad(onLoad) else loader.load(onLoad)
+              } catch (e: CancellationException) {
+                causes.add(e)
+              }
+            }
+          }
+          // 排队、替换和 cancelAndJoin 并发期间随机取消调用方
+          val cancellerJobs = List(4) {
+            launch {
+              start.await()
+              repeat(3) {
+                yield()
+                callerJobs[Random.nextInt(callerJobs.size)].cancel(CustomCancellationException(round))
+              }
+            }
+          }
+          if (round % 2 == 0) {
+            launch {
+              start.await()
+              yield()
+              loader.cancelAndJoin()
+            }
+          }
+          start.complete(Unit)
+          (callerJobs + cancellerJobs).joinAll()
+        }
+
+        // 调用方被取消后不能留下忙状态，也不能让其他任务重叠执行
+        assertEquals(false, overlapped.get())
+        assertEquals(0, running.get())
+        assertEquals(false, loader.isLoading())
+        assertEquals(1, loader.tryLoad { 1 }.getOrThrow())
+        causes.forEach { cause ->
+          val expected = cause is FLoader.ManualCancellationException ||
+            cause is FLoader.ReplacedCancellationException ||
+            cause is FLoader.BusyCancellationException ||
+            cause is CustomCancellationException
+          assertTrue("unexpected cause: $cause", expected)
+        }
       }
     }
   }
@@ -1967,6 +2072,44 @@ class LoaderTest {
     }.also { result ->
       assertSame(cancellation, result.exceptionOrNull())
     }
+  }
+
+  private suspend fun TestScope.checkOtherLoaderCancelledInBlock(replace: Boolean) {
+    val loader = FLoader()
+    val otherLoader = FLoader()
+    var exceptionInBlock: Throwable? = null
+    var loadException: Throwable? = null
+
+    val job = launch {
+      loadException = runCatching {
+        loader.load {
+          try {
+            otherLoader.load { delay(Long.MAX_VALUE) }
+          } catch (e: CancellationException) {
+            exceptionInBlock = e
+            throw e
+          }
+        }
+      }.exceptionOrNull()
+    }.also { runCurrent() }
+    assertEquals(true, loader.isLoading())
+    assertEquals(true, otherLoader.isLoading())
+
+    if (replace) {
+      otherLoader.load { 2 }.also { assertEquals(2, it.getOrThrow()) }
+    } else {
+      otherLoader.cancelAndJoin()
+    }
+    job.join()
+
+    // 内层 Loader 被别处取消时，外层 load 原样抛出内层的取消异常，而不是返回 Result.failure
+    val expectedType = if (replace) FLoader.ReplacedCancellationException::class else FLoader.ManualCancellationException::class
+    assertEquals(expectedType, exceptionInBlock!!::class)
+    assertEquals(expectedType, loadException!!::class)
+    assertEquals(false, loader.isLoading())
+    assertEquals(false, otherLoader.isLoading())
+    assertEquals(3, loader.tryLoad { 3 }.getOrThrow())
+    assertEquals(4, otherLoader.tryLoad { 4 }.getOrThrow())
   }
 
   private suspend fun TestScope.checkLoadInNonCancellableCancelled(replace: Boolean) {
