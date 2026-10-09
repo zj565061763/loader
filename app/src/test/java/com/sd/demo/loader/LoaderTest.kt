@@ -1617,12 +1617,22 @@ class LoaderTest {
 
   @Test
   fun `test load in NonCancellable cancelled by cancelAndJoin`() = runTest {
-    checkLoadInNonCancellableCancelled(replace = false)
+    checkLoadInNonCancellableCancelled(useTryLoad = false, replace = false)
   }
 
   @Test
   fun `test load in NonCancellable cancelled by new load`() = runTest {
-    checkLoadInNonCancellableCancelled(replace = true)
+    checkLoadInNonCancellableCancelled(useTryLoad = false, replace = true)
+  }
+
+  @Test
+  fun `test tryLoad in NonCancellable cancelled by cancelAndJoin`() = runTest {
+    checkLoadInNonCancellableCancelled(useTryLoad = true, replace = false)
+  }
+
+  @Test
+  fun `test tryLoad in NonCancellable cancelled by new load`() = runTest {
+    checkLoadInNonCancellableCancelled(useTryLoad = true, replace = true)
   }
 
   @Test
@@ -2178,25 +2188,27 @@ class LoaderTest {
     assertEquals(4, otherLoader.tryLoad { 4 }.getOrThrow())
   }
 
-  private suspend fun TestScope.checkLoadInNonCancellableCancelled(replace: Boolean) {
+  // load 与 tryLoad 的登记路径不同，需分别验证 NonCancellable 内仍会被取消
+  private suspend fun TestScope.checkLoadInNonCancellableCancelled(useTryLoad: Boolean, replace: Boolean) {
     val loader = FLoader()
     val container = mutableListOf<String>()
     var exceptionInBlock: Throwable? = null
     var loadException: Throwable? = null
+    val onLoad: suspend () -> Unit = {
+      try {
+        delay(Long.MAX_VALUE)
+      } catch (e: CancellationException) {
+        exceptionInBlock = e
+        throw e
+      } finally {
+        container.add("cleaned")
+      }
+    }
 
     val job = launch {
       withContext(NonCancellable) {
         loadException = runCatching {
-          loader.load {
-            try {
-              delay(Long.MAX_VALUE)
-            } catch (e: CancellationException) {
-              exceptionInBlock = e
-              throw e
-            } finally {
-              container.add("cleaned")
-            }
-          }
+          if (useTryLoad) loader.tryLoad(onLoad) else loader.load(onLoad)
         }.exceptionOrNull()
       }
     }.also { runCurrent() }

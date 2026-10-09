@@ -396,6 +396,21 @@ class MutexTest {
     assertEquals("Nested invoke", exception?.message)
   }
 
+  @Test(timeout = 10_000)
+  fun `test withLock nested in NonCancellable`() = runTest {
+    val mutex = FMutex()
+    // NonCancellable 不改变嵌套元素，同一实例嵌套仍会被拦截而不是自锁
+    val exception = mutex.withLock {
+      withContext(NonCancellable) {
+        runCatching { mutex.withLock { } }.exceptionOrNull()
+      }
+    }
+    assertEquals(true, exception is IllegalStateException)
+    assertFalse(exception is CancellationException)
+    assertEquals("Nested invoke", exception?.message)
+    assertEquals(2, mutex.withLock { 2 })
+  }
+
   @Test
   fun `test withLock nested in child coroutine`() = runTest {
     val mutex = FMutex()
