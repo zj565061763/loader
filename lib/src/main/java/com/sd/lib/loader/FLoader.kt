@@ -15,17 +15,18 @@ import kotlin.coroutines.cancellation.CancellationException
 interface FLoader {
   /**
    * 加载状态流，仅用于展示状态，快速变化的中间值可能被合并。
+   * 新旧任务切换时可能短暂为 false，不能用来判断[tryLoad]是否会成功，是否繁忙以[isBusy]为准。
    * 变为 false 时加载尚未结束，此时调用[load]或[cancelAndJoin]仍会取消它并丢弃加载结果；
    * 需要接着加载时，请在[load]返回后再调用。
    */
   val loadingFlow: StateFlow<Boolean>
 
   /**
-   * 是否正在加载中，仅用于展示状态。
-   * 新旧任务切换时可能短暂为 false，不能用来判断[tryLoad]是否会成功。
-   * 变为 false 时加载尚未结束，限制同[loadingFlow]。
+   * 是否繁忙，即是否有尚未结束的加载，等待中或取消后仍在清理的也算。
+   * 繁忙时[tryLoad]会抛出[BusyCancellationException]。
+   * 只是调用时刻的快照，不能用来先判断再调用[tryLoad]。
    */
-  fun isLoading(): Boolean
+  fun isBusy(): Boolean
 
   /**
    * 开始加载，并取消和等待上一次加载结束。
@@ -101,8 +102,8 @@ private class LoaderImpl : FLoader {
   private val _loadingFlow = MutableStateFlow(false)
   override val loadingFlow: StateFlow<Boolean> = _loadingFlow.asStateFlow()
 
-  override fun isLoading(): Boolean {
-    return _loadingFlow.value
+  override fun isBusy(): Boolean {
+    return _mutator.isBusy()
   }
 
   override suspend fun <T> load(onLoad: suspend () -> T): Result<T> {

@@ -83,7 +83,7 @@ class MutatorTest {
 
       assertEquals(1, caller.await().getOrThrow())
       assertEquals(true, callbackEntered.get())
-      assertEquals(false, loader.isLoading())
+      assertEquals(false, loader.loadingFlow.value)
       assertEquals(3, loader.tryLoad { 3 }.getOrThrow())
     }
   }
@@ -141,7 +141,7 @@ class MutatorTest {
 
       assertSame(cause, thrown)
       assertEquals(false, callbackEntered.get())
-      assertEquals(false, loader.isLoading())
+      assertEquals(false, loader.loadingFlow.value)
       assertEquals(3, loader.tryLoad { 3 }.getOrThrow())
     }
   }
@@ -901,7 +901,7 @@ class MutatorTest {
         callerPaused.await()
         assertEquals(true, probePaused.get())
         assertEquals(false, callbackEntered.get())
-        assertEquals(false, loader.isLoading())
+        assertEquals(false, loader.loadingFlow.value)
 
         val next = async {
           if (replace) {
@@ -927,7 +927,7 @@ class MutatorTest {
         assertEquals(2, next.await())
         assertEquals(false, callbackEntered.get())
         assertEquals(replace, replacementEntered.get())
-        assertEquals(false, loader.isLoading())
+        assertEquals(false, loader.loadingFlow.value)
         assertEquals(3, loader.tryLoad { 3 }.getOrThrow())
       } finally {
         releaseCaller.countDown()

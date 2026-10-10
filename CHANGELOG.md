@@ -6,6 +6,11 @@
 
 - **`loadingFlow` 改为 `FLoader` 的成员，类型为 `StateFlow<Boolean>`**：此前是返回 `Flow<Boolean>` 的扩展属性。收集的写法不变，但需要删除 `import com.sd.lib.loader.loadingFlow`；当前值可用 `loadingFlow.value` 读取。
 - **移除 `FLoader.State` 和 `stateFlow`**：加载状态只有是否加载中一项，请改用 `loadingFlow`。
+- **移除 `isLoading()`**：读取加载状态请改用 `loadingFlow.value`，判断是否繁忙请改用新增的 `isBusy()`。
+
+### ✨ Improvements
+
+- **新增 `FLoader.isBusy()`**：有尚未结束的加载时返回 `true`，等待中或取消后仍在清理的也算，此时 `tryLoad` 会抛出 `BusyCancellationException`。它只是调用时刻的快照，不能用来先判断再调用 `tryLoad`。
 
 ### 🐛 Bug Fixes
 
@@ -22,7 +27,7 @@
 - **补充多次取消时的异常说明**：加载被多次取消时只保留最先的取消原因，先被新的 `load` 替换再被 `cancelAndJoin()` 取消时抛出的仍是 `ReplacedCancellationException`。
 - **补充子协程内忙异常的说明**：在 `onLoad` 内启动的子协程中调用其他 Loader 的 `tryLoad`，忙异常按子协程取消处理，不会传播到当前加载。
 - **补充嵌套检测误判的场景**：在 `onLoad` 内启动继承了上下文但换成独立 `Job` 的协程（如 `CoroutineScope(currentCoroutineContext() + Job()).launch`），即使加载已结束，它调用同一 Loader 的 `load` / `tryLoad` / `cancelAndJoin` 仍会被判为嵌套，直接抛出 `IllegalStateException`，`FMutex.withLock` 同理。
-- **补充 `isLoading` 变为 `false` 时的说明**：此时加载尚未结束，调用 `load` 或 `cancelAndJoin()` 仍会取消它并丢弃加载结果；需要接着加载时，请在 `load` 返回后再调用。
+- **补充 `loadingFlow` 变为 `false` 时的说明**：此时加载尚未结束，调用 `load` 或 `cancelAndJoin()` 仍会取消它并丢弃加载结果；需要接着加载时，请在 `load` 返回后再调用。
 
 ### Migration
 
@@ -30,12 +35,14 @@
 // 1.9.0
 import com.sd.lib.loader.loadingFlow
 loader.stateFlow.collect { state -> render(state.isLoading) }
-val isLoading = loader.stateFlow.value.isLoading
+val isLoading = loader.isLoading()
 
 // 新版本
 // 删除 import com.sd.lib.loader.loadingFlow
 loader.loadingFlow.collect { isLoading -> render(isLoading) }
 val isLoading = loader.loadingFlow.value
+// 想知道 tryLoad 是否会判忙时，改用 isBusy()
+val isBusy = loader.isBusy()
 ```
 
 ## 1.9.0

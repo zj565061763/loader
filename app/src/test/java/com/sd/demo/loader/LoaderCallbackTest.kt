@@ -62,7 +62,7 @@ class LoaderCallbackTest(private val useTryLoad: Boolean) {
     assertEquals(true, contextElement.didCancel)
     assertSame(cause, thrown)
     assertEquals(false, callbackEntered)
-    assertEquals(false, loader.isLoading())
+    assertEquals(false, loader.loadingFlow.value)
     assertEquals(1, loader.tryLoad { 1 }.getOrThrow())
   }
 
@@ -72,14 +72,14 @@ class LoaderCallbackTest(private val useTryLoad: Boolean) {
     val cause = BusinessError(1)
 
     val result = loader.loadForTest {
-      assertEquals(true, loader.isLoading())
+      assertEquals(true, loader.loadingFlow.value)
       throw cause
     }
 
     assertSame(cause, result.exceptionOrNull())
-    assertEquals(false, loader.isLoading())
+    assertEquals(false, loader.loadingFlow.value)
     assertEquals(1, loader.tryLoad { 1 }.getOrThrow())
-    assertEquals(false, loader.isLoading())
+    assertEquals(false, loader.loadingFlow.value)
   }
 
   @Test
@@ -89,16 +89,16 @@ class LoaderCallbackTest(private val useTryLoad: Boolean) {
 
     val result = loader.loadForTest {
       CoroutineScope(currentCoroutineContext()).launch {
-        assertEquals(true, loader.isLoading())
+        assertEquals(true, loader.loadingFlow.value)
         throw cause
       }
       1
     }
 
     assertSame(cause, result.exceptionOrNull())
-    assertEquals(false, loader.isLoading())
+    assertEquals(false, loader.loadingFlow.value)
     assertEquals(2, loader.tryLoad { 2 }.getOrThrow())
-    assertEquals(false, loader.isLoading())
+    assertEquals(false, loader.loadingFlow.value)
   }
 
   @Test
@@ -118,8 +118,8 @@ class LoaderCallbackTest(private val useTryLoad: Boolean) {
     // 子协程内的忙异常按子协程取消处理，不会传播到当前加载
     assertTrue(childCause is FLoader.BusyCancellationException)
     assertEquals(1, result.getOrThrow())
-    assertEquals(false, loader.isLoading())
-    assertEquals(true, otherLoader.isLoading())
+    assertEquals(false, loader.loadingFlow.value)
+    assertEquals(true, otherLoader.loadingFlow.value)
     assertEquals(false, otherJob.isCancelled)
 
     otherJob.cancelAndJoin()
@@ -149,7 +149,7 @@ class LoaderCallbackTest(private val useTryLoad: Boolean) {
         assertEquals(true, awaitItem())
         assertEquals(listOf("callback-returned"), container)
         assertEquals(false, loading.isCompleted)
-        assertEquals(true, loader.isLoading())
+        assertEquals(true, loader.loadingFlow.value)
         assertTrue(runCatching { loader.tryLoad { 2 } }.exceptionOrNull() is FLoader.BusyCancellationException)
         expectNoEvents()
 
@@ -157,7 +157,7 @@ class LoaderCallbackTest(private val useTryLoad: Boolean) {
         assertEquals(1, loading.await().getOrThrow())
         assertEquals(listOf("callback-returned", "child-finished"), container)
         assertEquals(false, awaitItem())
-        assertEquals(false, loader.isLoading())
+        assertEquals(false, loader.loadingFlow.value)
       }
     } finally {
       releaseChild.complete(Unit)
@@ -190,7 +190,7 @@ class LoaderCallbackTest(private val useTryLoad: Boolean) {
         assertEquals(listOf("callback-returned"), container)
         assertEquals(true, awaitItem())
         assertEquals(false, awaitItem())
-        assertEquals(false, loader.isLoading())
+        assertEquals(false, loader.loadingFlow.value)
 
         releaseChild.complete(Unit)
         advanceUntilIdle()
@@ -240,7 +240,7 @@ class LoaderCallbackTest(private val useTryLoad: Boolean) {
         assertTrue(childCause is CancellationException)
         assertEquals(listOf("callback-returned", "child-cancelled"), container)
         assertEquals(false, loading.isCompleted)
-        assertEquals(true, loader.isLoading())
+        assertEquals(true, loader.loadingFlow.value)
         assertTrue(runCatching { loader.tryLoad { 2 } }.exceptionOrNull() is FLoader.BusyCancellationException)
         expectNoEvents()
 
@@ -248,7 +248,7 @@ class LoaderCallbackTest(private val useTryLoad: Boolean) {
         assertEquals(1, loading.await().getOrThrow())
         assertEquals(listOf("callback-returned", "child-cancelled", "sibling-finished"), container)
         assertEquals(false, awaitItem())
-        assertEquals(false, loader.isLoading())
+        assertEquals(false, loader.loadingFlow.value)
       }
     } finally {
       cancelChild.complete(Unit)
@@ -294,14 +294,14 @@ class LoaderCallbackTest(private val useTryLoad: Boolean) {
         runCurrent()
         assertEquals(true, cleanupStarted.isCompleted)
         assertEquals(false, loading.isCompleted)
-        assertEquals(true, loader.isLoading())
+        assertEquals(true, loader.loadingFlow.value)
         assertTrue(runCatching { loader.tryLoad { 2 } }.exceptionOrNull() is FLoader.BusyCancellationException)
         expectNoEvents()
 
         releaseCleanup.complete(Unit)
         assertSame(cause, loading.await().exceptionOrNull())
         assertEquals(false, awaitItem())
-        assertEquals(false, loader.isLoading())
+        assertEquals(false, loader.loadingFlow.value)
       } finally {
         // 在 test 等待子协程结束前释放清理信号
         failChild.complete(Unit)
@@ -349,14 +349,14 @@ class LoaderCallbackTest(private val useTryLoad: Boolean) {
         runCurrent()
         assertEquals(true, cleanupStarted.isCompleted)
         assertEquals(false, loading.isCompleted)
-        assertEquals(true, loader.isLoading())
+        assertEquals(true, loader.loadingFlow.value)
         assertTrue(runCatching { loader.tryLoad { 2 } }.exceptionOrNull() is FLoader.BusyCancellationException)
         expectNoEvents()
 
         releaseCleanup.complete(Unit)
         assertSame(cause, loading.await().exceptionOrNull())
         assertEquals(false, awaitItem())
-        assertEquals(false, loader.isLoading())
+        assertEquals(false, loader.loadingFlow.value)
       } finally {
         failCallback.complete(Unit)
         releaseCleanup.complete(Unit)
@@ -408,7 +408,7 @@ class LoaderCallbackTest(private val useTryLoad: Boolean) {
         assertEquals(true, cleanupStarted.isCompleted)
         assertSame(cause, childCause)
         assertEquals(false, loading.isCompleted)
-        assertEquals(true, loader.isLoading())
+        assertEquals(true, loader.loadingFlow.value)
         assertEquals(emptyList<String>(), container)
         assertTrue(runCatching { loader.tryLoad { 2 } }.exceptionOrNull() is FLoader.BusyCancellationException)
         expectNoEvents()
@@ -418,7 +418,7 @@ class LoaderCallbackTest(private val useTryLoad: Boolean) {
         assertEquals(false, loading.isCancelled)
         assertEquals(listOf("child-cleaned"), container)
         assertEquals(false, awaitItem())
-        assertEquals(false, loader.isLoading())
+        assertEquals(false, loader.loadingFlow.value)
       } finally {
         releaseCleanup.complete(Unit)
         loading.cancelAndJoin()
@@ -483,7 +483,7 @@ class LoaderCallbackTest(private val useTryLoad: Boolean) {
         assertEquals(true, loading.isCancelled)
         assertEquals(listOf("callback-returned"), container)
         assertEquals(false, awaitItem())
-        assertEquals(false, loader.isLoading())
+        assertEquals(false, loader.loadingFlow.value)
       } finally {
         loading.cancelAndJoin()
       }
@@ -530,14 +530,14 @@ class LoaderCallbackTest(private val useTryLoad: Boolean) {
         assertEquals(true, cleanupStarted.isCompleted)
         assertTrue(childCause is TimeoutCancellationException)
         assertEquals(false, loading.isCompleted)
-        assertEquals(true, loader.isLoading())
+        assertEquals(true, loader.loadingFlow.value)
         assertTrue(runCatching { loader.tryLoad { 2 } }.exceptionOrNull() is FLoader.BusyCancellationException)
         expectNoEvents()
 
         releaseCleanup.complete(Unit)
         assertTrue(loading.await() is TimeoutCancellationException)
         assertEquals(false, awaitItem())
-        assertEquals(false, loader.isLoading())
+        assertEquals(false, loader.loadingFlow.value)
       } finally {
         releaseCleanup.complete(Unit)
         loading.cancelAndJoin()
@@ -597,7 +597,7 @@ class LoaderCallbackTest(private val useTryLoad: Boolean) {
         assertEquals(true, loading.isCancelled)
         assertEquals(false, loading.isCompleted)
         assertEquals(null, loadCause)
-        assertEquals(true, loader.isLoading())
+        assertEquals(true, loader.loadingFlow.value)
         assertEquals(listOf("callback-returned"), container)
         assertTrue(runCatching { loader.tryLoad { 2 } }.exceptionOrNull() is FLoader.BusyCancellationException)
         expectNoEvents()
@@ -607,7 +607,7 @@ class LoaderCallbackTest(private val useTryLoad: Boolean) {
         assertSame(cause, loadCause)
         assertEquals(listOf("callback-returned", "child-cleaned"), container)
         assertEquals(false, awaitItem())
-        assertEquals(false, loader.isLoading())
+        assertEquals(false, loader.loadingFlow.value)
       } finally {
         releaseCleanup.complete(Unit)
         loading.cancelAndJoin()
@@ -657,7 +657,7 @@ class LoaderCallbackTest(private val useTryLoad: Boolean) {
     }
 
     assertTrue(cause is IllegalStateException)
-    assertEquals(false, loader.isLoading())
+    assertEquals(false, loader.loadingFlow.value)
     assertEquals(2, loader.tryLoad { 2 }.getOrThrow())
   }
 
@@ -670,7 +670,7 @@ class LoaderCallbackTest(private val useTryLoad: Boolean) {
       assertEquals(1, awaitItem())
       awaitComplete()
     }
-    assertEquals(false, loader.isLoading())
+    assertEquals(false, loader.loadingFlow.value)
   }
 
   @Test
@@ -682,7 +682,7 @@ class LoaderCallbackTest(private val useTryLoad: Boolean) {
       assertEquals(1, awaitItem())
       awaitComplete()
     }
-    assertEquals(false, loader.isLoading())
+    assertEquals(false, loader.loadingFlow.value)
   }
 
   private suspend fun <T> FLoader.loadForTest(onLoad: suspend () -> T): Result<T> {
@@ -702,7 +702,7 @@ class LoaderCallbackTest(private val useTryLoad: Boolean) {
     assertTrue(nestedCause is IllegalStateException)
     assertEquals("Nested invoke", nestedCause?.message)
     assertEquals(1, result.getOrThrow())
-    assertEquals(false, loader.isLoading())
+    assertEquals(false, loader.loadingFlow.value)
     assertEquals(2, loader.tryLoad { 2 }.getOrThrow())
   }
 
@@ -720,12 +720,12 @@ class LoaderCallbackTest(private val useTryLoad: Boolean) {
     }.also { runCurrent() }
     assertTrue(nestedCause is IllegalStateException)
     assertEquals(false, outerJob.isCompleted)
-    assertEquals(true, loader.isLoading())
+    assertEquals(true, loader.loadingFlow.value)
 
     // 被拦截的嵌套调用不能改动任务登记，之后的 load 仍须能替换外层加载
     assertEquals(2, loader.load { 2 }.getOrThrow())
     assertTrue(outerJob.await() is FLoader.ReplacedCancellationException)
-    assertEquals(false, loader.isLoading())
+    assertEquals(false, loader.loadingFlow.value)
     assertEquals(3, loader.tryLoad { 3 }.getOrThrow())
   }
 
@@ -749,7 +749,7 @@ class LoaderCallbackTest(private val useTryLoad: Boolean) {
     }.also { runCurrent() }
 
     try {
-      assertEquals(true, loader.isLoading())
+      assertEquals(true, loader.loadingFlow.value)
       assertEquals(false, loading.isCompleted)
       if (replace) {
         loader.load {
@@ -765,7 +765,7 @@ class LoaderCallbackTest(private val useTryLoad: Boolean) {
       assertTrue(if (replace) cause is FLoader.ReplacedCancellationException else cause is FLoader.ManualCancellationException)
       val expected = if (replace) listOf("callback-returned", "new-load") else listOf("callback-returned")
       assertEquals(expected, container)
-      assertEquals(false, loader.isLoading())
+      assertEquals(false, loader.loadingFlow.value)
     } finally {
       loading.cancelAndJoin()
     }
@@ -815,7 +815,7 @@ class LoaderCallbackTest(private val useTryLoad: Boolean) {
       assertTrue(if (replace) childCause is FLoader.ReplacedCancellationException else childCause is FLoader.ManualCancellationException)
       assertEquals(false, loading.isCompleted)
       assertEquals(false, next.isCompleted)
-      assertEquals(true, loader.isLoading())
+      assertEquals(true, loader.loadingFlow.value)
       assertEquals(listOf("callback-returned"), container)
       assertTrue(runCatching { loader.tryLoad { 3 } }.exceptionOrNull() is FLoader.BusyCancellationException)
 
@@ -825,7 +825,7 @@ class LoaderCallbackTest(private val useTryLoad: Boolean) {
       assertEquals(2, next.await())
       val expected = if (replace) listOf("callback-returned", "child-cleaned", "new-load") else listOf("callback-returned", "child-cleaned")
       assertEquals(expected, container)
-      assertEquals(false, loader.isLoading())
+      assertEquals(false, loader.loadingFlow.value)
     } finally {
       releaseCleanup.complete(Unit)
     }

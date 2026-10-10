@@ -61,12 +61,12 @@ class LoaderTest {
   fun `test load when success`() = runTest {
     val loader = FLoader()
     loader.load {
-      assertEquals(true, loader.isLoading())
+      assertEquals(true, loader.loadingFlow.value)
       1
     }.also { result ->
       assertEquals(1, result.getOrThrow())
     }
-    assertEquals(false, loader.isLoading())
+    assertEquals(false, loader.loadingFlow.value)
   }
 
   @Test
@@ -74,12 +74,12 @@ class LoaderTest {
     val loader = FLoader()
     val cause = BusinessException(1)
     loader.load {
-      assertEquals(true, loader.isLoading())
+      assertEquals(true, loader.loadingFlow.value)
       throw cause
     }.also { result ->
       assertSame(cause, result.exceptionOrNull())
     }
-    assertEquals(false, loader.isLoading())
+    assertEquals(false, loader.loadingFlow.value)
   }
 
   @Test
@@ -99,12 +99,12 @@ class LoaderTest {
     }
 
     // onLoad 已返回，但子协程未结束，仍处于加载中
-    assertEquals(true, loader.isLoading())
+    assertEquals(true, loader.loadingFlow.value)
     assertEquals(false, job.isCompleted)
 
     // 子协程的普通异常包装为 Result.failure，不会直接抛出
     assertSame(cause, job.await().exceptionOrNull())
-    assertEquals(false, loader.isLoading())
+    assertEquals(false, loader.loadingFlow.value)
   }
 
   @Test
@@ -112,7 +112,7 @@ class LoaderTest {
     val loader = FLoader()
     assertNull(loader.load<String?> { null }.getOrThrow())
     assertNull(loader.tryLoad<String?> { null }.getOrThrow())
-    assertEquals(false, loader.isLoading())
+    assertEquals(false, loader.loadingFlow.value)
   }
 
   @Test
@@ -129,7 +129,7 @@ class LoaderTest {
     advanceUntilIdle()
     // 超时返回 null 并包装为 Result.success，不像 withTimeout 那样抛出异常
     assertNull(job.await().getOrThrow())
-    assertEquals(false, loader.isLoading())
+    assertEquals(false, loader.loadingFlow.value)
   }
 
   @Test
@@ -150,7 +150,7 @@ class LoaderTest {
     }
 
     loader.load {
-      assertEquals(true, loader.isLoading())
+      assertEquals(true, loader.loadingFlow.value)
       assertEquals("1", container)
       assertEquals(true, job.isCancelled)
       assertEquals(true, job.isCompleted)
@@ -158,7 +158,7 @@ class LoaderTest {
     }.also { result ->
       assertEquals(2, result.getOrThrow())
     }
-    assertEquals(false, loader.isLoading())
+    assertEquals(false, loader.loadingFlow.value)
   }
 
   @Test
@@ -256,7 +256,7 @@ class LoaderTest {
       // 先被替换再被 cancelAndJoin 取消的加载保留最先的取消原因
       assertTrue(exceptionInBlock is FLoader.ReplacedCancellationException)
       assertTrue(firstJob.await() is FLoader.ReplacedCancellationException)
-      assertEquals(false, loader.isLoading())
+      assertEquals(false, loader.loadingFlow.value)
       assertEquals(3, loader.tryLoad { 3 }.getOrThrow())
     } finally {
       releaseCleanup.complete(Unit)
@@ -309,7 +309,7 @@ class LoaderTest {
     assertSame(cause, exceptionInBlock)
     assertSame(cause, loadException)
     assertEquals(true, job.isCancelled)
-    assertEquals(false, loader.isLoading())
+    assertEquals(false, loader.loadingFlow.value)
     assertEquals(3, loader.tryLoad { 3 }.getOrThrow())
   }
 
@@ -331,7 +331,7 @@ class LoaderTest {
       assertEquals(true, job.isCancelled)
       assertEquals(true, job.isCompleted)
       assertEquals("1", container)
-      assertEquals(false, loader.isLoading())
+      assertEquals(false, loader.loadingFlow.value)
     }
   }
 
@@ -341,7 +341,7 @@ class LoaderTest {
     var loadingInBlock = false
     launch {
       loader.load {
-        loadingInBlock = loader.isLoading()
+        loadingInBlock = loader.loadingFlow.value
         throw CancellationException()
       }
     }.also { job ->
@@ -349,7 +349,7 @@ class LoaderTest {
       assertEquals(true, loadingInBlock)
       assertEquals(true, job.isCancelled)
       assertEquals(true, job.isCompleted)
-      assertEquals(false, loader.isLoading())
+      assertEquals(false, loader.loadingFlow.value)
     }
   }
 
@@ -360,7 +360,7 @@ class LoaderTest {
     val exception = runCatching { loader.load { throw cause } }.exceptionOrNull()
 
     assertSame(cause, exception)
-    assertEquals(false, loader.isLoading())
+    assertEquals(false, loader.loadingFlow.value)
   }
 
   @Test
@@ -370,7 +370,7 @@ class LoaderTest {
     val exception = runCatching { loader.tryLoad { throw cause } }.exceptionOrNull()
 
     assertSame(cause, exception)
-    assertEquals(false, loader.isLoading())
+    assertEquals(false, loader.loadingFlow.value)
   }
 
   @Test
@@ -384,7 +384,7 @@ class LoaderTest {
       runCurrent()
       assertEquals(true, job.isCancelled)
       assertEquals(true, job.isCompleted)
-      assertEquals(false, loader.isLoading())
+      assertEquals(false, loader.loadingFlow.value)
     }
   }
 
@@ -408,7 +408,7 @@ class LoaderTest {
     loader.cancelAndJoin()
     // 取消后 onLoad 抛出的普通异常不能作为 Result 返回
     assertEquals(true, job.await() is FLoader.ManualCancellationException)
-    assertEquals(false, loader.isLoading())
+    assertEquals(false, loader.loadingFlow.value)
   }
 
   @Test
@@ -431,7 +431,7 @@ class LoaderTest {
     loader.load { 2 }.also { assertEquals(2, it.getOrThrow()) }
     // 被替换后 onLoad 抛出的普通异常不能作为 Result 返回
     assertEquals(true, job.await() is FLoader.ReplacedCancellationException)
-    assertEquals(false, loader.isLoading())
+    assertEquals(false, loader.loadingFlow.value)
   }
 
   @Test
@@ -454,7 +454,7 @@ class LoaderTest {
 
     // 调用方的取消原因原样传播，不被替换为其他取消异常
     assertEquals(true, thrown === cause)
-    assertEquals(false, loader.isLoading())
+    assertEquals(false, loader.loadingFlow.value)
   }
 
   @Test
@@ -476,7 +476,7 @@ class LoaderTest {
     }
 
     assertEquals(true, thrown === cause)
-    assertEquals(false, loader.isLoading())
+    assertEquals(false, loader.loadingFlow.value)
   }
 
   @Test
@@ -495,7 +495,7 @@ class LoaderTest {
     advanceUntilIdle()
     // TimeoutCancellationException 原样抛出，不包装为 Result.failure
     assertEquals(true, job.await() is TimeoutCancellationException)
-    assertEquals(false, loader.isLoading())
+    assertEquals(false, loader.loadingFlow.value)
   }
 
   @Test
@@ -513,7 +513,7 @@ class LoaderTest {
 
     advanceUntilIdle()
     assertEquals(true, job.await() is TimeoutCancellationException)
-    assertEquals(false, loader.isLoading())
+    assertEquals(false, loader.loadingFlow.value)
   }
 
   @Test
@@ -526,7 +526,7 @@ class LoaderTest {
       assertEquals(true, result.exceptionOrNull() is IllegalStateException)
       assertEquals("Nested invoke", result.exceptionOrNull()!!.message)
     }
-    assertEquals(false, loader.isLoading())
+    assertEquals(false, loader.loadingFlow.value)
   }
 
   @Test(timeout = 10_000)
@@ -541,7 +541,7 @@ class LoaderTest {
       assertEquals(true, result.exceptionOrNull() is IllegalStateException)
       assertEquals("Nested invoke", result.exceptionOrNull()!!.message)
     }
-    assertEquals(false, loader.isLoading())
+    assertEquals(false, loader.loadingFlow.value)
   }
 
   @Test
@@ -665,7 +665,7 @@ class LoaderTest {
       assertEquals(true, result.exceptionOrNull() is FLoader.BusyCancellationException)
       assertEquals("Loader is busy", result.exceptionOrNull()?.message)
     }
-    assertEquals(true, loader.isLoading())
+    assertEquals(true, loader.loadingFlow.value)
 
     job.cancelAndJoin()
 
@@ -687,10 +687,73 @@ class LoaderTest {
     // 忙异常只从 tryLoad 抛出，捕获后调用方协程仍处于活动状态
     assertTrue(cause is FLoader.BusyCancellationException)
     assertEquals(true, currentCoroutineContext().isActive)
-    assertEquals(true, loader.isLoading())
+    assertEquals(true, loader.loadingFlow.value)
 
     job.cancelAndJoin()
     assertEquals(2, loader.tryLoad { 2 }.getOrThrow())
+  }
+
+  @Test
+  fun `test isBusy`() = runTest {
+    val loader = FLoader()
+    assertEquals(false, loader.isBusy())
+
+    // 回调内自己就是尚未结束的加载
+    assertEquals(true, loader.load { loader.isBusy() }.getOrThrow())
+    assertEquals(false, loader.isBusy())
+    assertEquals(true, loader.tryLoad { loader.isBusy() }.getOrThrow())
+    assertEquals(false, loader.isBusy())
+
+    val job = launch {
+      loader.load {
+        try {
+          delay(Long.MAX_VALUE)
+        } finally {
+          withContext(NonCancellable) { delay(1000) }
+        }
+      }
+    }.also { runCurrent() }
+    assertEquals(true, loader.isBusy())
+
+    // 取消后仍在清理，仍算繁忙
+    job.cancel()
+    runCurrent()
+    assertEquals(false, job.isCompleted)
+    assertEquals(true, loader.isBusy())
+
+    job.join()
+    assertEquals(false, loader.isBusy())
+  }
+
+  @Test(timeout = 10_000)
+  fun `test isBusy when queued load not resumed after previous finished`() = runTest {
+    val loader = FLoader()
+    val queuedScheduler = TestCoroutineScheduler()
+    val queuedDispatcher = StandardTestDispatcher(queuedScheduler)
+    val firstJob = async {
+      runCatching { loader.load { delay(Long.MAX_VALUE) } }.exceptionOrNull()
+    }.also { runCurrent() }
+
+    // 使用独立调度器，让排队任务在旧任务结束后停在恢复前
+    val queuedJob = async(queuedDispatcher + queuedScheduler) { loader.load { 2 }.getOrThrow() }
+    try {
+      queuedScheduler.runCurrent()
+      runCurrent()
+      assertTrue(firstJob.await() is FLoader.ReplacedCancellationException)
+      assertEquals(false, queuedJob.isCompleted)
+
+      // 没有加载在执行，loadingFlow 为 false，但排队加载尚未结束，仍算繁忙
+      assertEquals(false, loader.loadingFlow.value)
+      assertEquals(true, loader.isBusy())
+      assertTrue(runCatching { loader.tryLoad { 3 } }.exceptionOrNull() is FLoader.BusyCancellationException)
+
+      queuedScheduler.runCurrent()
+      assertEquals(2, queuedJob.await())
+      assertEquals(false, loader.isBusy())
+    } finally {
+      queuedScheduler.runCurrent()
+      runCurrent()
+    }
   }
 
   @Test
@@ -726,7 +789,7 @@ class LoaderTest {
     assertTrue(result.exceptionOrNull() is IllegalStateException)
     assertEquals("Nested invoke", result.exceptionOrNull()?.message)
     assertEquals(false, nestedEntered)
-    assertEquals(false, loader.isLoading())
+    assertEquals(false, loader.loadingFlow.value)
     assertEquals(1, loader.tryLoad { 1 }.getOrThrow())
   }
 
@@ -773,7 +836,7 @@ class LoaderTest {
       assertEquals(true, result.exceptionOrNull() is IllegalStateException)
       assertEquals("Nested invoke", result.exceptionOrNull()!!.message)
     }
-    assertEquals(false, loader.isLoading())
+    assertEquals(false, loader.loadingFlow.value)
   }
 
   @Test(timeout = 10_000)
@@ -795,7 +858,7 @@ class LoaderTest {
 
       assertTrue(exception is FLoader.ReplacedCancellationException)
       assertEquals(listOf("outer-started", "inner-load"), container)
-      assertEquals(false, loader.isLoading())
+      assertEquals(false, loader.loadingFlow.value)
       assertEquals(1, loader.tryLoad { 1 }.getOrThrow())
     } finally {
       rootScope.cancel()
@@ -821,7 +884,7 @@ class LoaderTest {
       // 忙异常是取消异常，从外层 onLoad 穿透后由外层 load 原样抛出
       assertTrue(exception is FLoader.BusyCancellationException)
       assertEquals(listOf("outer-started"), container)
-      assertEquals(false, loader.isLoading())
+      assertEquals(false, loader.loadingFlow.value)
       assertEquals(1, loader.tryLoad { 1 }.getOrThrow())
     } finally {
       rootScope.cancel()
@@ -851,7 +914,7 @@ class LoaderTest {
       // 外层等待内层时被取消，内层 cancelAndJoin 等外层结束后才返回
       assertTrue(exception is FLoader.ManualCancellationException)
       assertEquals(listOf("outer-started", "inner-cancel-finished"), container)
-      assertEquals(false, loader.isLoading())
+      assertEquals(false, loader.loadingFlow.value)
       assertEquals(1, loader.tryLoad { 1 }.getOrThrow())
     } finally {
       rootScope.cancel()
@@ -877,7 +940,7 @@ class LoaderTest {
         1
       }
       assertEquals(1, result.getOrThrow())
-      assertEquals(false, loader.isLoading())
+      assertEquals(false, loader.loadingFlow.value)
 
       // 外层加载已结束，这些调用仍被判为嵌套
       release.complete(Unit)
@@ -887,7 +950,7 @@ class LoaderTest {
         assertTrue(cause is IllegalStateException)
         assertEquals("Nested invoke", cause?.message)
       }
-      assertEquals(false, loader.isLoading())
+      assertEquals(false, loader.loadingFlow.value)
       assertEquals(2, loader.tryLoad { 2 }.getOrThrow())
     } finally {
       release.complete(Unit)
@@ -943,16 +1006,16 @@ class LoaderTest {
       assertEquals(true, cleanupStarted.isCompleted)
       assertEquals(false, otherJob.isCompleted)
       assertEquals(false, loading.isCompleted)
-      assertEquals(true, otherLoader.isLoading())
-      assertEquals(true, loader.isLoading())
+      assertEquals(true, otherLoader.loadingFlow.value)
+      assertEquals(true, loader.loadingFlow.value)
       assertEquals(listOf("outer-started"), container)
 
       releaseCleanup.complete(Unit)
       assertEquals(2, loading.await().getOrThrow())
       assertTrue(otherJob.await() is FLoader.ManualCancellationException)
       assertEquals(listOf("outer-started", "other-cleaned", "outer-resumed"), container)
-      assertEquals(false, otherLoader.isLoading())
-      assertEquals(false, loader.isLoading())
+      assertEquals(false, otherLoader.loadingFlow.value)
+      assertEquals(false, loader.loadingFlow.value)
       assertEquals(3, otherLoader.tryLoad { 3 }.getOrThrow())
       assertEquals(4, loader.tryLoad { 4 }.getOrThrow())
     } finally {
@@ -983,7 +1046,7 @@ class LoaderTest {
     loader.cancelAndJoin()
     // 取消原因会传给内层，内层抛出的是外层的 ManualCancellationException
     assertEquals(true, otherException is FLoader.ManualCancellationException)
-    assertEquals(false, otherLoader.isLoading())
+    assertEquals(false, otherLoader.loadingFlow.value)
   }
 
   @Test
@@ -1016,13 +1079,13 @@ class LoaderTest {
         }
       }.exceptionOrNull()
     }.also { runCurrent() }
-    assertEquals(true, loader.isLoading())
-    assertEquals(true, otherLoader.isLoading())
+    assertEquals(true, loader.loadingFlow.value)
+    assertEquals(true, otherLoader.loadingFlow.value)
 
     val nextJob = async {
       loader.load {
         assertEquals(listOf("inner-cleaned"), container)
-        assertEquals(false, otherLoader.isLoading())
+        assertEquals(false, otherLoader.loadingFlow.value)
         container.add("new-load")
         2
       }
@@ -1039,8 +1102,8 @@ class LoaderTest {
     assertEquals(true, firstJob.await() is FLoader.ReplacedCancellationException)
     assertEquals(2, nextJob.await().getOrThrow())
     assertEquals(listOf("inner-cleaned", "new-load"), container)
-    assertEquals(false, loader.isLoading())
-    assertEquals(false, otherLoader.isLoading())
+    assertEquals(false, loader.loadingFlow.value)
+    assertEquals(false, otherLoader.loadingFlow.value)
     assertEquals(3, otherLoader.tryLoad { 3 }.getOrThrow())
   }
 
@@ -1073,8 +1136,8 @@ class LoaderTest {
       assertEquals(true, result.exceptionOrNull() is FLoader.BusyCancellationException)
     }
 
-    assertEquals(false, loader.isLoading())
-    assertEquals(true, otherLoader.isLoading())
+    assertEquals(false, loader.loadingFlow.value)
+    assertEquals(true, otherLoader.loadingFlow.value)
     assertEquals(false, otherJob.isCancelled)
 
     otherJob.cancelAndJoin()
@@ -1085,12 +1148,12 @@ class LoaderTest {
     val loader = FLoader()
     val cause = BusinessException(3)
     loader.tryLoad {
-      assertEquals(true, loader.isLoading())
+      assertEquals(true, loader.loadingFlow.value)
       throw cause
     }.also { result ->
       assertSame(cause, result.exceptionOrNull())
     }
-    assertEquals(false, loader.isLoading())
+    assertEquals(false, loader.loadingFlow.value)
   }
 
   @Test
@@ -1113,7 +1176,7 @@ class LoaderTest {
     runCatching { loader.tryLoad { } }.also { result ->
       assertEquals(true, result.exceptionOrNull() is FLoader.BusyCancellationException)
     }
-    assertEquals(true, loader.isLoading())
+    assertEquals(true, loader.loadingFlow.value)
     assertEquals("", container)
     assertEquals(false, job.isCancelled)
 
@@ -1135,7 +1198,7 @@ class LoaderTest {
     // 判忙的 tryLoad 不能改动任务登记，之后的 load 仍须能替换运行中的加载
     assertEquals(2, loader.load { 2 }.getOrThrow())
     assertTrue(firstJob.await() is FLoader.ReplacedCancellationException)
-    assertEquals(false, loader.isLoading())
+    assertEquals(false, loader.loadingFlow.value)
   }
 
   @Test
@@ -1189,7 +1252,7 @@ class LoaderTest {
     loader.cancelAndJoin()
     assertEquals("1", container)
     assertEquals(true, job.await() is FLoader.ManualCancellationException)
-    assertEquals(false, loader.isLoading())
+    assertEquals(false, loader.loadingFlow.value)
   }
 
   @Test
@@ -1293,7 +1356,7 @@ class LoaderTest {
     // 被取消的 load 不会执行，最新的 load 只等旧任务清理一次
     assertEquals("13", container)
     assertEquals(startTime + 1000, currentTime)
-    assertEquals(false, loader.isLoading())
+    assertEquals(false, loader.loadingFlow.value)
   }
 
   @Test
@@ -1363,7 +1426,7 @@ class LoaderTest {
       assertTrue(firstJob.await() is FLoader.ReplacedCancellationException)
       runCurrent()
       assertEquals(listOf(1), container)
-      assertEquals(false, loader.isLoading())
+      assertEquals(false, loader.loadingFlow.value)
       loader.tryLoad { container.add(4) }.getOrThrow()
       assertEquals(listOf(1, 4), container)
     } finally {
@@ -1388,7 +1451,7 @@ class LoaderTest {
     assertTrue(firstJob.await() is FLoader.ReplacedCancellationException)
     assertEquals(true, queuedJob.isCompleted)
     assertEquals(emptyList<String>(), container)
-    assertEquals(false, loader.isLoading())
+    assertEquals(false, loader.loadingFlow.value)
   }
 
   @Test
@@ -1420,7 +1483,7 @@ class LoaderTest {
       assertEquals(true, cancelledJob.isCompleted)
     }
 
-    assertEquals(true, loader.isLoading())
+    assertEquals(true, loader.loadingFlow.value)
     assertEquals(false, loadingJob.isCancelled)
     assertEquals("", container)
 
@@ -1438,7 +1501,7 @@ class LoaderTest {
       assertEquals(true, cancelledJob.isCompleted)
     }
     assertEquals("1", container)
-    assertEquals(false, loader.isLoading())
+    assertEquals(false, loader.loadingFlow.value)
     assertEquals(3, loader.tryLoad { 3 }.getOrThrow())
   }
 
@@ -1462,7 +1525,7 @@ class LoaderTest {
     // 已取消的调用方不能顶掉运行中任务的登记，之后的 load 仍须能替换它
     assertEquals(2, loader.load { 2 }.getOrThrow())
     assertTrue(firstJob.await() is FLoader.ReplacedCancellationException)
-    assertEquals(false, loader.isLoading())
+    assertEquals(false, loader.loadingFlow.value)
   }
 
   @Test
@@ -1494,7 +1557,7 @@ class LoaderTest {
       assertEquals(true, cancelledJob.isCompleted)
     }
 
-    assertEquals(true, loader.isLoading())
+    assertEquals(true, loader.loadingFlow.value)
     assertEquals(false, loadingJob.isCancelled)
     assertEquals("", container)
 
@@ -1513,7 +1576,7 @@ class LoaderTest {
       assertEquals(true, cancelledJob.isCompleted)
     }
     assertEquals("1", container)
-    assertEquals(false, loader.isLoading())
+    assertEquals(false, loader.loadingFlow.value)
     assertEquals(3, loader.tryLoad { 3 }.getOrThrow())
   }
 
@@ -1568,7 +1631,7 @@ class LoaderTest {
         assertEquals(false, overlapped.get())
         assertEquals(0, running.get())
         assertEquals(true, started.get() > 0)
-        assertEquals(false, loader.isLoading())
+        assertEquals(false, loader.loadingFlow.value)
         // load 只会被后续任务替换，tryLoad 还可能判忙
         loadCauses.forEach { cause ->
           assertTrue("unexpected load cause: $cause", cause is FLoader.ReplacedCancellationException)
@@ -1626,7 +1689,7 @@ class LoaderTest {
         assertEquals(true, failures.get() > 0)
         assertEquals(false, overlapped.get())
         assertEquals(0, running.get())
-        assertEquals(false, loader.isLoading())
+        assertEquals(false, loader.loadingFlow.value)
         assertEquals(1, loader.tryLoad { 1 }.getOrThrow())
         // load 只会被后续任务替换，tryLoad 还可能判忙
         loadCauses.forEach { cause ->
@@ -1693,7 +1756,7 @@ class LoaderTest {
         // 调用方被取消后不能留下忙状态，也不能让其他任务重叠执行
         assertEquals(false, overlapped.get())
         assertEquals(0, running.get())
-        assertEquals(false, loader.isLoading())
+        assertEquals(false, loader.loadingFlow.value)
         assertEquals(1, loader.tryLoad { 1 }.getOrThrow())
         causes.forEach { cause ->
           val expected = cause is FLoader.ManualCancellationException ||
@@ -1798,7 +1861,7 @@ class LoaderTest {
         assertEquals(false, overlapped.get())
         assertEquals(0, running.get())
         assertEquals(entered.get(), exited.get())
-        assertEquals(false, loader.isLoading())
+        assertEquals(false, loader.loadingFlow.value)
         assertEquals(1, loader.tryLoad { 1 }.getOrThrow())
         causes.forEach { cause ->
           val expected = cause is FLoader.ManualCancellationException ||
@@ -1843,7 +1906,7 @@ class LoaderTest {
           // 成功任务保持加载，其余调用必须立即判忙，不能等待它结束
           withTimeout(5_000) { attempted.awaitAll() }
           assertEquals(1, entered.get())
-          assertEquals(true, loader.isLoading())
+          assertEquals(true, loader.loadingFlow.value)
         } finally {
           releaseLoad.complete(Unit)
         }
@@ -1851,7 +1914,7 @@ class LoaderTest {
         val results = loadJobs.awaitAll()
         assertEquals(1, results.count { it == 1 })
         assertEquals(15, results.count { it == null })
-        assertEquals(false, loader.isLoading())
+        assertEquals(false, loader.loadingFlow.value)
         assertEquals(2, loader.tryLoad { 2 }.getOrThrow())
       }
     }
@@ -1901,7 +1964,7 @@ class LoaderTest {
           }
 
           loadJob.await()
-          assertEquals(false, loader.isLoading())
+          assertEquals(false, loader.loadingFlow.value)
         } finally {
           release.complete(Unit)
         }
@@ -2014,7 +2077,7 @@ class LoaderTest {
           assertTrue(first.await() is FLoader.ManualCancellationException)
           assertEquals(false, overlapped.get())
           assertEquals(0, running.get())
-          assertEquals(false, loader.isLoading())
+          assertEquals(false, loader.loadingFlow.value)
           assertEquals(2, loader.tryLoad { 2 }.getOrThrow())
         } finally {
           releaseCleanup.complete(Unit)
@@ -2073,7 +2136,7 @@ class LoaderTest {
       assertSame(cause, cancelException)
       assertEquals(false, firstJob.isCompleted)
       assertEquals(false, nextJob.isCompleted)
-      assertEquals(true, loader.isLoading())
+      assertEquals(true, loader.loadingFlow.value)
       assertEquals(emptyList<String>(), container)
       assertTrue(runCatching { loader.tryLoad { 3 } }.exceptionOrNull() is FLoader.BusyCancellationException)
 
@@ -2081,7 +2144,7 @@ class LoaderTest {
       assertTrue(firstJob.await() is FLoader.ManualCancellationException)
       assertEquals(2, nextJob.await().getOrThrow())
       assertEquals(listOf("old-cleaned", "new-load"), container)
-      assertEquals(false, loader.isLoading())
+      assertEquals(false, loader.loadingFlow.value)
       assertEquals(3, loader.tryLoad { 3 }.getOrThrow())
     } finally {
       releaseCleanup.complete(Unit)
@@ -2130,14 +2193,14 @@ class LoaderTest {
       assertEquals(true, cancelJob.isCancelled)
       assertEquals(false, cancelJob.isCompleted)
       assertEquals(false, firstJob.isCompleted)
-      assertEquals(true, loader.isLoading())
+      assertEquals(true, loader.loadingFlow.value)
       assertEquals(emptyList<String>(), container)
 
       releaseCleanup.complete(Unit)
       cancelJob.join()
       assertTrue(firstJob.await() is FLoader.ReplacedCancellationException)
       assertEquals(listOf("old-cleaned", "cancel-finished"), container)
-      assertEquals(false, loader.isLoading())
+      assertEquals(false, loader.loadingFlow.value)
       assertEquals(2, loader.tryLoad { 2 }.getOrThrow())
     } finally {
       releaseCleanup.complete(Unit)
@@ -2163,8 +2226,8 @@ class LoaderTest {
 
     job.cancelAndJoin()
     assertEquals(1, cleanupResult)
-    assertEquals(false, loader.isLoading())
-    assertEquals(false, otherLoader.isLoading())
+    assertEquals(false, loader.loadingFlow.value)
+    assertEquals(false, otherLoader.loadingFlow.value)
     assertEquals(2, otherLoader.tryLoad { 2 }.getOrThrow())
   }
 
@@ -2228,7 +2291,7 @@ class LoaderTest {
 
     advanceUntilIdle()
     assertEquals("1", container)
-    assertEquals(false, loader.isLoading())
+    assertEquals(false, loader.loadingFlow.value)
 
     // 之后发起的加载不受影响
     loader.load { container += "3" }.getOrThrow()
@@ -2274,7 +2337,7 @@ class LoaderTest {
     assertEquals(true, loadJobs[1].await() is FLoader.ManualCancellationException)
     advanceUntilIdle()
     assertEquals("1", container)
-    assertEquals(false, loader.isLoading())
+    assertEquals(false, loader.loadingFlow.value)
   }
 
   // 回归时会在单线程上忙等，用超时让测试失败而不是卡住
@@ -2308,7 +2371,7 @@ class LoaderTest {
     cancelJob.join()
     // 旧任务必须先清理，取消方和新加载的恢复顺序不限
     assertTrue("Unexpected order: $container", container == "123" || container == "132")
-    assertEquals(false, loader.isLoading())
+    assertEquals(false, loader.loadingFlow.value)
   }
 
   @Test(timeout = 10_000)
@@ -2357,7 +2420,7 @@ class LoaderTest {
       assertTrue(firstJob.await() is FLoader.ManualCancellationException)
       assertEquals(listOf("old-cleaned", "new-load"), container)
       assertEquals(false, cancelJob.isCompleted)
-      assertEquals(true, loader.isLoading())
+      assertEquals(true, loader.loadingFlow.value)
 
       // 新加载仍在执行，cancelAndJoin 只需等待调用时的任务
       cancelScheduler.runCurrent()
@@ -2365,11 +2428,11 @@ class LoaderTest {
       assertEquals(listOf("old-cleaned", "new-load", "cancel-finished"), container)
       assertEquals(false, nextJob.isCompleted)
       assertEquals(false, nextJob.isCancelled)
-      assertEquals(true, loader.isLoading())
+      assertEquals(true, loader.loadingFlow.value)
 
       releaseLoad.complete(Unit)
       assertEquals(2, nextJob.await())
-      assertEquals(false, loader.isLoading())
+      assertEquals(false, loader.loadingFlow.value)
       assertEquals(3, loader.tryLoad { 3 }.getOrThrow())
     } finally {
       releaseCleanup.complete(Unit)
@@ -2411,7 +2474,7 @@ class LoaderTest {
       assertTrue(queuedJob.await() is FLoader.ManualCancellationException)
       assertEquals(false, queuedEntered)
       assertEquals(true, cancelJob.isCompleted)
-      assertEquals(false, loader.isLoading())
+      assertEquals(false, loader.loadingFlow.value)
       assertEquals(1, loader.tryLoad { 1 }.getOrThrow())
     } finally {
       queuedScheduler.runCurrent()
@@ -2463,7 +2526,7 @@ class LoaderTest {
       assertTrue(queuedJob.await() is FLoader.ManualCancellationException)
       assertEquals(false, queuedEntered)
       assertEquals(true, cancelJob.isCompleted)
-      assertEquals(false, loader.isLoading())
+      assertEquals(false, loader.loadingFlow.value)
       assertEquals(1, loader.tryLoad { 1 }.getOrThrow())
     } finally {
       releaseCleanup.complete(Unit)
@@ -2513,7 +2576,7 @@ class LoaderTest {
       queuedScheduler.runCurrent()
       assertTrue(queuedJob.await() is FLoader.ReplacedCancellationException)
       assertEquals(listOf("old-cleaned", "new-load"), container)
-      assertEquals(false, loader.isLoading())
+      assertEquals(false, loader.loadingFlow.value)
     } finally {
       queuedScheduler.runCurrent()
       runCurrent()
@@ -2586,7 +2649,7 @@ class LoaderTest {
           callbackCause.get()?.also { assertTrue(it is FLoader.ManualCancellationException) }
           assertEquals(false, loaded.get())
           firstJob.join()
-          assertEquals(false, loader.isLoading())
+          assertEquals(false, loader.loadingFlow.value)
         } finally {
           releaseCleanup.complete(Unit)
           releaseLoad.complete(Unit)
@@ -2637,7 +2700,7 @@ class LoaderTest {
         causes.forEach { cause ->
           assertTrue("unexpected cause: $cause", cause is FLoader.ReplacedCancellationException)
         }
-        assertEquals(false, loader.isLoading())
+        assertEquals(false, loader.loadingFlow.value)
         loader.load { }.getOrThrow()
       }
     }
@@ -2692,7 +2755,7 @@ class LoaderTest {
             cause is FLoader.ReplacedCancellationException
           assertTrue("unexpected cause: $cause", expected)
         }
-        assertEquals(false, loader.isLoading())
+        assertEquals(false, loader.loadingFlow.value)
         loader.load { }.getOrThrow()
       }
     }
@@ -2743,7 +2806,7 @@ class LoaderTest {
           val expected = cause is FLoader.ReplacedCancellationException || cause is FLoader.BusyCancellationException
           assertTrue("unexpected tryLoad cause: $cause", expected)
         }
-        assertEquals(false, loader.isLoading())
+        assertEquals(false, loader.loadingFlow.value)
         assertEquals(1, loader.tryLoad { 1 }.getOrThrow())
       }
     }
@@ -2766,7 +2829,7 @@ class LoaderTest {
     assertTrue(exception is FLoader.ReplacedCancellationException)
     assertEquals(true, firstJob.isCompleted)
     assertEquals(listOf("finally-load"), container)
-    assertEquals(false, loader.isLoading())
+    assertEquals(false, loader.loadingFlow.value)
     assertEquals(1, loader.tryLoad { 1 }.getOrThrow())
   }
 
@@ -2788,7 +2851,7 @@ class LoaderTest {
     assertTrue(exception is FLoader.ManualCancellationException)
     assertEquals(true, firstJob.isCompleted)
     assertEquals(listOf("cancel-finished"), container)
-    assertEquals(false, loader.isLoading())
+    assertEquals(false, loader.loadingFlow.value)
     assertEquals(1, loader.tryLoad { 1 }.getOrThrow())
   }
 
@@ -2813,7 +2876,7 @@ class LoaderTest {
     assertTrue(tryLoadCause is FLoader.BusyCancellationException)
     assertEquals(true, firstJob.isCompleted)
     assertEquals(listOf("new-load"), container)
-    assertEquals(false, loader.isLoading())
+    assertEquals(false, loader.loadingFlow.value)
     assertEquals(1, loader.tryLoad { 1 }.getOrThrow())
   }
 
@@ -2844,13 +2907,13 @@ class LoaderTest {
       // finally 内的加载仍在运行，cancelAndJoin 不取消也不等待它
       assertNull(finallyResult)
       assertEquals(false, firstJob.isCompleted)
-      assertEquals(true, loader.isLoading())
+      assertEquals(true, loader.loadingFlow.value)
       assertEquals(listOf("finally-load", "cancel-finished"), container)
 
       releaseLoad.complete(Unit)
       firstJob.join()
       assertEquals(2, finallyResult?.getOrThrow())
-      assertEquals(false, loader.isLoading())
+      assertEquals(false, loader.loadingFlow.value)
       assertEquals(1, loader.tryLoad { 1 }.getOrThrow())
     } finally {
       releaseLoad.complete(Unit)
@@ -2884,13 +2947,13 @@ class LoaderTest {
       // finally 内的加载仍在运行，cancelAndJoin 不取消也不等待它
       assertNull(tryLoadResult)
       assertEquals(false, firstJob.isCompleted)
-      assertEquals(true, loader.isLoading())
+      assertEquals(true, loader.loadingFlow.value)
       assertEquals(listOf("finally-tryLoad", "cancel-finished"), container)
 
       releaseLoad.complete(Unit)
       firstJob.join()
       assertEquals(2, tryLoadResult?.getOrThrow())
-      assertEquals(false, loader.isLoading())
+      assertEquals(false, loader.loadingFlow.value)
       assertEquals(1, loader.tryLoad { 1 }.getOrThrow())
     } finally {
       releaseLoad.complete(Unit)
@@ -2915,7 +2978,7 @@ class LoaderTest {
     container.add("cancel-finished")
     assertEquals(true, firstJob.isCompleted)
     assertEquals(listOf("finally-cancel-finished", "cancel-finished"), container)
-    assertEquals(false, loader.isLoading())
+    assertEquals(false, loader.loadingFlow.value)
     assertEquals(1, loader.tryLoad { 1 }.getOrThrow())
   }
 
@@ -2954,7 +3017,7 @@ class LoaderTest {
     assertEquals(true, queuedJob.isCompleted)
     assertEquals(listOf("old-cleaned", "finally-load"), container)
     assertEquals(startTime + 1000, currentTime)
-    assertEquals(false, loader.isLoading())
+    assertEquals(false, loader.loadingFlow.value)
     assertEquals(1, loader.tryLoad { 1 }.getOrThrow())
   }
 
@@ -3005,7 +3068,7 @@ class LoaderTest {
       // finally 内的加载仍在运行，cancelAndJoin 不取消也不等待它
       assertNull(finallyResult)
       assertEquals(false, queuedJob.isCompleted)
-      assertEquals(true, loader.isLoading())
+      assertEquals(true, loader.loadingFlow.value)
       // 旧任务必须先清理，取消方和 finally 内加载的恢复顺序不限
       assertEquals("old-cleaned", container.first())
       assertEquals(setOf("old-cleaned", "finally-load", "cancel-finished"), container.toSet())
@@ -3014,7 +3077,7 @@ class LoaderTest {
       releaseLoad.complete(Unit)
       queuedJob.join()
       assertEquals(2, finallyResult?.getOrThrow())
-      assertEquals(false, loader.isLoading())
+      assertEquals(false, loader.loadingFlow.value)
       assertEquals(1, loader.tryLoad { 1 }.getOrThrow())
     } finally {
       releaseLoad.complete(Unit)
@@ -3055,7 +3118,7 @@ class LoaderTest {
     assertEquals(true, queuedJob.isCompleted)
     assertEquals(listOf("old-cleaned", "new-load"), container)
     assertEquals(startTime + 1000, currentTime)
-    assertEquals(false, loader.isLoading())
+    assertEquals(false, loader.loadingFlow.value)
     assertEquals(1, loader.tryLoad { 1 }.getOrThrow())
   }
 
@@ -3091,7 +3154,7 @@ class LoaderTest {
     assertEquals(true, queuedJob.isCompleted)
     assertEquals(listOf("old-cleaned", "cancel-finished"), container)
     assertEquals(startTime + 1000, currentTime)
-    assertEquals(false, loader.isLoading())
+    assertEquals(false, loader.loadingFlow.value)
     assertEquals(1, loader.tryLoad { 1 }.getOrThrow())
   }
 
@@ -3131,7 +3194,7 @@ class LoaderTest {
     assertEquals(true, queuedJob.isCompleted)
     assertEquals(listOf("old-cleaned", "cancel-finished"), container)
     assertEquals(startTime + 1000, currentTime)
-    assertEquals(false, loader.isLoading())
+    assertEquals(false, loader.loadingFlow.value)
     assertEquals(1, loader.tryLoad { 1 }.getOrThrow())
   }
 
@@ -3171,7 +3234,7 @@ class LoaderTest {
     assertEquals("old-cleaned", container.first())
     assertEquals(setOf("old-cleaned", "finally-cancel-finished", "cancel-finished"), container.toSet())
     assertEquals(3, container.size)
-    assertEquals(false, loader.isLoading())
+    assertEquals(false, loader.loadingFlow.value)
     assertEquals(1, loader.tryLoad { 1 }.getOrThrow())
   }
 
@@ -3179,7 +3242,7 @@ class LoaderTest {
   fun `test cancel when idle`() = runTest {
     val loader = FLoader()
     loader.cancelAndJoin()
-    assertEquals(false, loader.isLoading())
+    assertEquals(false, loader.loadingFlow.value)
     loader.load { 1 }.also { result ->
       assertEquals(1, result.getOrThrow())
     }
@@ -3198,7 +3261,7 @@ class LoaderTest {
 
     assertEquals(true, caller.isCancelled)
     assertEquals(true, returned)
-    assertEquals(false, loader.isLoading())
+    assertEquals(false, loader.loadingFlow.value)
     assertEquals(1, loader.tryLoad { 1 }.getOrThrow())
   }
 
@@ -3224,7 +3287,7 @@ class LoaderTest {
     val container = mutableListOf<String>()
     val collectorJob = launch(Dispatchers.Unconfined) {
       loader.loadingFlow.first { it }
-      // 收集者在 isLoading 变为 true 的更新调用内联执行，此时加载已登记但尚未进入 onLoad
+      // 收集者在 loadingFlow 变为 true 的更新调用内联执行，此时加载已登记但尚未进入 onLoad
       container.add("collector-cancel")
       loader.cancelAndJoin()
       container.add("collector-cancel-finished")
@@ -3241,7 +3304,7 @@ class LoaderTest {
     assertTrue(exception is FLoader.ManualCancellationException)
     assertEquals(true, collectorJob.isCompleted)
     assertEquals(listOf("collector-cancel", "load-entered", "collector-cancel-finished"), container)
-    assertEquals(false, loader.isLoading())
+    assertEquals(false, loader.loadingFlow.value)
     assertEquals(1, loader.tryLoad { 1 }.getOrThrow())
   }
 
@@ -3252,7 +3315,7 @@ class LoaderTest {
     var collectorResult: Result<Int>? = null
     val collectorJob = launch(Dispatchers.Unconfined) {
       loader.loadingFlow.first { it }
-      // 收集者在 isLoading 变为 true 的更新调用内联执行，这里发起的 load 会替换尚未进入 onLoad 的加载
+      // 收集者在 loadingFlow 变为 true 的更新调用内联执行，这里发起的 load 会替换尚未进入 onLoad 的加载
       container.add("collector-load")
       collectorResult = loader.load {
         container.add("collector-load-entered")
@@ -3272,7 +3335,7 @@ class LoaderTest {
     assertEquals(true, collectorJob.isCompleted)
     assertEquals(2, collectorResult?.getOrThrow())
     assertEquals(listOf("collector-load", "load-entered", "collector-load-entered"), container)
-    assertEquals(false, loader.isLoading())
+    assertEquals(false, loader.loadingFlow.value)
     assertEquals(1, loader.tryLoad { 1 }.getOrThrow())
   }
 
@@ -3283,7 +3346,7 @@ class LoaderTest {
     var tryLoadCause: Throwable? = null
     val collectorJob = launch(Dispatchers.Unconfined) {
       loader.loadingFlow.first { it }
-      // 收集者在 isLoading 变为 true 的更新调用内联执行，此时加载已登记但尚未进入 onLoad，tryLoad 必须立即判忙
+      // 收集者在 loadingFlow 变为 true 的更新调用内联执行，此时加载已登记但尚未进入 onLoad，tryLoad 必须立即判忙
       container.add("collector-tryLoad")
       tryLoadCause = runCatching { loader.tryLoad { container.add("collector-tryLoad-entered") } }.exceptionOrNull()
     }
@@ -3298,7 +3361,7 @@ class LoaderTest {
     assertEquals(true, collectorJob.isCompleted)
     assertTrue(tryLoadCause is FLoader.BusyCancellationException)
     assertEquals(listOf("collector-tryLoad", "load-entered"), container)
-    assertEquals(false, loader.isLoading())
+    assertEquals(false, loader.loadingFlow.value)
     assertEquals(2, loader.tryLoad { 2 }.getOrThrow())
   }
 
@@ -3310,7 +3373,7 @@ class LoaderTest {
     val collectorJob = launch(Dispatchers.Unconfined) {
       loader.loadingFlow.first { it }
       loader.loadingFlow.first { !it }
-      // 收集者在 isLoading 恢复 false 的更新调用内联执行，此时加载尚未结束，这里发起的 load 仍会替换它
+      // 收集者在 loadingFlow 恢复 false 的更新调用内联执行，此时加载尚未结束，这里发起的 load 仍会替换它
       collectorResult = loader.load {
         container.add("collector-load-entered")
         2
@@ -3329,7 +3392,7 @@ class LoaderTest {
     assertEquals(true, collectorJob.isCompleted)
     assertEquals(2, collectorResult?.getOrThrow())
     assertEquals(listOf("load-returned", "collector-load-entered"), container)
-    assertEquals(false, loader.isLoading())
+    assertEquals(false, loader.loadingFlow.value)
     assertEquals(3, loader.tryLoad { 3 }.getOrThrow())
   }
 
@@ -3340,7 +3403,7 @@ class LoaderTest {
     val collectorJob = launch(Dispatchers.Unconfined) {
       loader.loadingFlow.first { it }
       loader.loadingFlow.first { !it }
-      // 收集者在 isLoading 恢复 false 的更新调用内联执行，此时加载尚未结束，这里的 cancelAndJoin 仍会取消它
+      // 收集者在 loadingFlow 恢复 false 的更新调用内联执行，此时加载尚未结束，这里的 cancelAndJoin 仍会取消它
       loader.cancelAndJoin()
       container.add("collector-cancel-finished")
     }
@@ -3356,7 +3419,7 @@ class LoaderTest {
     assertTrue(exception is FLoader.ManualCancellationException)
     assertEquals(true, collectorJob.isCompleted)
     assertEquals(listOf("load-returned", "collector-cancel-finished"), container)
-    assertEquals(false, loader.isLoading())
+    assertEquals(false, loader.loadingFlow.value)
     assertEquals(2, loader.tryLoad { 2 }.getOrThrow())
   }
 
@@ -3365,12 +3428,14 @@ class LoaderTest {
     val loader = FLoader()
     val container = mutableListOf<String>()
     var loadingInCollector: Boolean? = null
+    var busyInCollector: Boolean? = null
     var tryLoadCause: Throwable? = null
     val collectorJob = launch(Dispatchers.Unconfined) {
       loader.loadingFlow.first { it }
       loader.loadingFlow.first { !it }
-      // 收集者在 isLoading 恢复 false 的更新调用内联执行，此时加载尚未结束，tryLoad 必须立即判忙
-      loadingInCollector = loader.isLoading()
+      // 收集者在 loadingFlow 恢复 false 的更新调用内联执行，此时加载尚未结束，tryLoad 必须立即判忙
+      loadingInCollector = loader.loadingFlow.value
+      busyInCollector = loader.isBusy()
       tryLoadCause = runCatching { loader.tryLoad { container.add("collector-tryLoad") } }.exceptionOrNull()
     }
 
@@ -3383,9 +3448,10 @@ class LoaderTest {
     assertEquals(1, result.getOrThrow())
     assertEquals(true, collectorJob.isCompleted)
     assertEquals(false, loadingInCollector)
+    assertEquals(true, busyInCollector)
     assertTrue(tryLoadCause is FLoader.BusyCancellationException)
     assertEquals(listOf("load-returned"), container)
-    assertEquals(false, loader.isLoading())
+    assertEquals(false, loader.loadingFlow.value)
     assertEquals(2, loader.tryLoad { 2 }.getOrThrow())
   }
 
@@ -3431,8 +3497,8 @@ class LoaderTest {
         }
       }.exceptionOrNull()
     }.also { runCurrent() }
-    assertEquals(true, loader.isLoading())
-    assertEquals(true, otherLoader.isLoading())
+    assertEquals(true, loader.loadingFlow.value)
+    assertEquals(true, otherLoader.loadingFlow.value)
 
     if (replace) {
       otherLoader.load { 2 }.also { assertEquals(2, it.getOrThrow()) }
@@ -3446,8 +3512,8 @@ class LoaderTest {
     assertEquals(expectedType, exceptionInBlock!!::class)
     assertEquals(expectedType, loadException!!::class)
     assertEquals(false, job.isCancelled)
-    assertEquals(false, loader.isLoading())
-    assertEquals(false, otherLoader.isLoading())
+    assertEquals(false, loader.loadingFlow.value)
+    assertEquals(false, otherLoader.loadingFlow.value)
     assertEquals(3, loader.tryLoad { 3 }.getOrThrow())
     assertEquals(4, otherLoader.tryLoad { 4 }.getOrThrow())
   }
@@ -3497,7 +3563,7 @@ class LoaderTest {
       val expectedType = if (replace) FLoader.ReplacedCancellationException::class else FLoader.ManualCancellationException::class
       assertEquals(expectedType, exceptionInBlock!!::class)
       assertEquals(expectedType, loadException!!::class)
-      assertEquals(false, loader.isLoading())
+      assertEquals(false, loader.loadingFlow.value)
       assertEquals(3, loader.tryLoad { 3 }.getOrThrow())
     } finally {
       releaseCleanup.complete(Unit)
@@ -3530,7 +3596,7 @@ class LoaderTest {
     val expectedType = if (replace) FLoader.ReplacedCancellationException::class else FLoader.ManualCancellationException::class
     assertEquals(expectedType, exceptionInBlock!!::class)
     assertEquals(expectedType, job.await()!!::class)
-    assertEquals(false, loader.isLoading())
+    assertEquals(false, loader.loadingFlow.value)
     assertEquals(3, loader.tryLoad { 3 }.getOrThrow())
   }
 
@@ -3564,7 +3630,7 @@ class LoaderTest {
       runCurrent()
       assertSame(cause, exceptionInBlock)
       assertEquals(false, firstJob.isCompleted)
-      assertEquals(true, loader.isLoading())
+      assertEquals(true, loader.loadingFlow.value)
 
       // 调用方已取消但旧任务仍在清理，新的 load 和 cancelAndJoin 必须等待，tryLoad 立即判忙
       val nextJob = async {
@@ -3590,7 +3656,7 @@ class LoaderTest {
       assertSame(cause, loadException)
       assertEquals(true, firstJob.isCancelled)
       assertEquals(if (cancel) listOf("old-cleaned", "cancel-finished") else listOf("old-cleaned", "new-load"), container)
-      assertEquals(false, loader.isLoading())
+      assertEquals(false, loader.loadingFlow.value)
       assertEquals(3, loader.tryLoad { 3 }.getOrThrow())
     } finally {
       releaseCleanup.complete(Unit)
@@ -3622,7 +3688,7 @@ class LoaderTest {
         }.exceptionOrNull()
       }
     }.also { runCurrent() }
-    assertEquals(true, loader.isLoading())
+    assertEquals(true, loader.loadingFlow.value)
 
     if (replace) {
       loader.load {
@@ -3640,7 +3706,7 @@ class LoaderTest {
     assertEquals(expectedType, loadException!!::class)
     assertEquals(false, job.isCancelled)
     assertEquals(if (replace) listOf("cleaned", "new-load") else listOf("cleaned"), container)
-    assertEquals(false, loader.isLoading())
+    assertEquals(false, loader.loadingFlow.value)
     assertEquals(3, loader.tryLoad { 3 }.getOrThrow())
   }
 }

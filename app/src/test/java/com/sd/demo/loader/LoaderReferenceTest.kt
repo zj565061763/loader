@@ -234,11 +234,11 @@ class LoaderReferenceTest(private val useTryLoad: Boolean) {
         scope.endQueued(this, queued)
         assertEquals(true, queued.isCompleted)
         assertEquals(false, first.isCompleted)
-        assertEquals(true, isLoading())
+        assertEquals(true, loadingFlow.value)
         capture
       }
       assertEquals(false, first.isCompleted)
-      assertEquals(true, loader.isLoading())
+      assertEquals(true, loader.loadingFlow.value)
     } finally {
       releaseCleanup.complete(Unit)
       runTest { scopeJob.cancelAndJoin() }
@@ -282,11 +282,11 @@ class LoaderReferenceTest(private val useTryLoad: Boolean) {
         queued.join()
         assertEquals(true, queued.isCompleted)
         assertEquals(false, first.isCompleted)
-        assertEquals(true, isLoading())
+        assertEquals(true, loadingFlow.value)
         payload
       }
       assertEquals(false, first.isCompleted)
-      assertEquals(true, loader.isLoading())
+      assertEquals(true, loader.loadingFlow.value)
     } finally {
       releaseCleanup.complete(Unit)
       runTest { scopeJob.cancelAndJoin() }
@@ -386,10 +386,10 @@ class LoaderReferenceTest(private val useTryLoad: Boolean) {
         releaseCleanup.complete(Unit)
         first.join()
         assertEquals(false, next.isCompleted)
-        assertEquals(true, isLoading())
+        assertEquals(true, loadingFlow.value)
         capture
       }
-      assertEquals(true, loader.isLoading())
+      assertEquals(true, loader.loadingFlow.value)
     } finally {
       releaseCleanup.complete(Unit)
       releaseNext.complete(Unit)
