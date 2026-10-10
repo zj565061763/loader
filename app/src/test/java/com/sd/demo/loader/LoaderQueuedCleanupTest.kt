@@ -2,7 +2,6 @@ package com.sd.demo.loader
 
 import app.cash.turbine.test
 import com.sd.lib.loader.FLoader
-import com.sd.lib.loader.loadingFlow
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.NonCancellable

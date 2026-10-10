@@ -2,7 +2,6 @@ package com.sd.demo.loader
 
 import app.cash.turbine.test
 import com.sd.lib.loader.FLoader
-import com.sd.lib.loader.loadingFlow
 import com.sd.lib.loader.safeRunCatching
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
@@ -3204,33 +3203,19 @@ class LoaderTest {
   }
 
   @Test
-  fun `test stateFlow`() = runTest {
+  fun `test loadingFlow value`() = runTest {
     val loader = FLoader()
-    assertEquals(FLoader.State(isLoading = false), loader.stateFlow.value)
+    assertEquals(false, loader.loadingFlow.value)
     loader.load {
-      assertEquals(FLoader.State(isLoading = true), loader.stateFlow.value)
+      assertEquals(true, loader.loadingFlow.value)
     }.getOrThrow()
-    assertEquals(FLoader.State(isLoading = false), loader.stateFlow.value)
+    assertEquals(false, loader.loadingFlow.value)
   }
 
   @Test
-  fun `test stateFlow is read only`() {
+  fun `test loadingFlow is read only`() {
     // 对外只读，不能强转成 MutableStateFlow 修改状态
-    assertEquals(false, FLoader().stateFlow is MutableStateFlow<*>)
-  }
-
-  @Test
-  fun `test stateFlow when cancel`() = runTest {
-    val loader = FLoader()
-    // 直接收集 stateFlow，不经过 loadingFlow 的映射和去重
-    loader.stateFlow.test {
-      assertEquals(FLoader.State(isLoading = false), awaitItem())
-      val job = launch { loader.load { delay(Long.MAX_VALUE) } }.also { runCurrent() }
-      assertEquals(FLoader.State(isLoading = true), awaitItem())
-      loader.cancelAndJoin()
-      assertEquals(FLoader.State(isLoading = false), awaitItem())
-      assertEquals(true, job.isCancelled)
-    }
+    assertEquals(false, FLoader().loadingFlow is MutableStateFlow<*>)
   }
 
   @Test(timeout = 10_000)
@@ -3238,7 +3223,7 @@ class LoaderTest {
     val loader = FLoader()
     val container = mutableListOf<String>()
     val collectorJob = launch(Dispatchers.Unconfined) {
-      loader.stateFlow.first { it.isLoading }
+      loader.loadingFlow.first { it }
       // 收集者在 isLoading 变为 true 的更新调用内联执行，此时加载已登记但尚未进入 onLoad
       container.add("collector-cancel")
       loader.cancelAndJoin()
@@ -3266,7 +3251,7 @@ class LoaderTest {
     val container = mutableListOf<String>()
     var collectorResult: Result<Int>? = null
     val collectorJob = launch(Dispatchers.Unconfined) {
-      loader.stateFlow.first { it.isLoading }
+      loader.loadingFlow.first { it }
       // 收集者在 isLoading 变为 true 的更新调用内联执行，这里发起的 load 会替换尚未进入 onLoad 的加载
       container.add("collector-load")
       collectorResult = loader.load {
@@ -3297,7 +3282,7 @@ class LoaderTest {
     val container = mutableListOf<String>()
     var tryLoadCause: Throwable? = null
     val collectorJob = launch(Dispatchers.Unconfined) {
-      loader.stateFlow.first { it.isLoading }
+      loader.loadingFlow.first { it }
       // 收集者在 isLoading 变为 true 的更新调用内联执行，此时加载已登记但尚未进入 onLoad，tryLoad 必须立即判忙
       container.add("collector-tryLoad")
       tryLoadCause = runCatching { loader.tryLoad { container.add("collector-tryLoad-entered") } }.exceptionOrNull()
@@ -3323,8 +3308,8 @@ class LoaderTest {
     val container = mutableListOf<String>()
     var collectorResult: Result<Int>? = null
     val collectorJob = launch(Dispatchers.Unconfined) {
-      loader.stateFlow.first { it.isLoading }
-      loader.stateFlow.first { !it.isLoading }
+      loader.loadingFlow.first { it }
+      loader.loadingFlow.first { !it }
       // 收集者在 isLoading 恢复 false 的更新调用内联执行，此时加载尚未结束，这里发起的 load 仍会替换它
       collectorResult = loader.load {
         container.add("collector-load-entered")
@@ -3353,8 +3338,8 @@ class LoaderTest {
     val loader = FLoader()
     val container = mutableListOf<String>()
     val collectorJob = launch(Dispatchers.Unconfined) {
-      loader.stateFlow.first { it.isLoading }
-      loader.stateFlow.first { !it.isLoading }
+      loader.loadingFlow.first { it }
+      loader.loadingFlow.first { !it }
       // 收集者在 isLoading 恢复 false 的更新调用内联执行，此时加载尚未结束，这里的 cancelAndJoin 仍会取消它
       loader.cancelAndJoin()
       container.add("collector-cancel-finished")
@@ -3382,8 +3367,8 @@ class LoaderTest {
     var loadingInCollector: Boolean? = null
     var tryLoadCause: Throwable? = null
     val collectorJob = launch(Dispatchers.Unconfined) {
-      loader.stateFlow.first { it.isLoading }
-      loader.stateFlow.first { !it.isLoading }
+      loader.loadingFlow.first { it }
+      loader.loadingFlow.first { !it }
       // 收集者在 isLoading 恢复 false 的更新调用内联执行，此时加载尚未结束，tryLoad 必须立即判忙
       loadingInCollector = loader.isLoading()
       tryLoadCause = runCatching { loader.tryLoad { container.add("collector-tryLoad") } }.exceptionOrNull()

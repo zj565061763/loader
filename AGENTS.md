@@ -34,11 +34,11 @@
 
 核心代码位于 `lib/src/main/java/com/sd/lib/loader/`：
 
-- `FLoader.kt`：公开的 `FLoader` 接口、工厂函数 `FLoader()`、`loadingFlow` 扩展和 `safeRunCatching`，具体实现是私有的 `LoaderImpl`
+- `FLoader.kt`：公开的 `FLoader` 接口、工厂函数 `FLoader()` 和 `safeRunCatching`，具体实现是私有的 `LoaderImpl`
 - `FMutator.kt`：内部并发协调器，负责串行执行、取消旧任务以及忙状态判断，不属于公开 API
 - `FMutex.kt`：公开的互斥封装，在普通 `Mutex` 基础上增加同一实例的嵌套调用检测
 
-公开面应保持精简。修改 `FLoader`、`FLoader()`、`FLoader.State`、`FLoader.ManualCancellationException`、`FLoader.ReplacedCancellationException`、`FLoader.BusyCancellationException`、`loadingFlow`、`safeRunCatching` 或 `FMutex` 时，应按公开 API 兼容性审视改动。
+公开面应保持精简。修改 `FLoader`、`FLoader()`、`FLoader.ManualCancellationException`、`FLoader.ReplacedCancellationException`、`FLoader.BusyCancellationException`、`safeRunCatching` 或 `FMutex` 时，应按公开 API 兼容性审视改动。
 
 ## 并发语义与不可破坏的约束
 
@@ -60,7 +60,7 @@
 - 已取消的调用方不能取消其他加载，也不能妨碍之后的 `load` 替换运行中的加载：`mutate` 进入时先检查 `ensureActive`，再登记并取消上一个任务
 - `doLoad` 只把普通异常转换为 `Result.failure`；`CancellationException` 必须重新抛出，不能被包装或吞掉。公开的 `safeRunCatching` 也遵循相同规则
 - `doLoad` 必须用 `coroutineScope` 包裹 `onLoad`：`onLoad` 用当前上下文启动的子协程挂在这个 scope 上，否则子协程的普通异常会绕过 `Result.failure`，`isLoading` 也会在子协程结束前变为 `false`
-- `stateFlow` 通过 `asStateFlow()` 对外只读，使用方不能强转成 `MutableStateFlow` 修改状态
+- `loadingFlow` 通过 `asStateFlow()` 对外只读，使用方不能强转成 `MutableStateFlow` 修改状态
 - `isLoading` 在调用 `onLoad` 前设为 `true`，并在 `finally` 中恢复为 `false`。重新加载时会依次更新为 `false`、`true`，但 `StateFlow` 可能合并快速更新，收集者不保证收到完整序列
 - `isLoading` 在任务内更新，恢复 `false` 时任务尚未结束：此时 `tryLoad` 仍判忙，新的 `load` 或 `cancelAndJoin` 仍会取消它，`onLoad` 已返回的结果被丢弃
 - Unconfined 收集者会在 `isLoading` 的更新调用中内联执行：变为 `true` 时内联取消或替换加载，`onLoad` 仍会执行到第一个挂起点
@@ -151,7 +151,7 @@
 
 | 测试类 | 覆盖范围 |
 |---|---|
-| `LoaderTest` | 加载结果、取消（含先被替换再被 `cancelAndJoin` 取消时保留替换原因，先被替换或被 `cancelAndJoin` 取消再被调用方取消时保留最先原因，`onLoad` 捕获取消后抛出其他取消异常，以及已取消的调用方不妨碍之后的 `load` 替换运行中的加载）、忙状态（含忙异常不取消调用方，以及判忙后 `load` 仍能替换运行中的加载）、排队（含旧任务结束后恢复前被 `cancelAndJoin` 取消且此时 `tryLoad` 仍判忙，`cancelAndJoin` 在旧任务清理结束后仍等被取消的排队任务退出，新 `load` 不等被它替换的排队任务退出，排队任务刚登记就被调用方取消后旧任务仍被取消，以及旧任务调用方取消后新 `load` 与 `cancelAndJoin` 等待清理且保留调用方原因）、多线程（含 `onLoad` 抛普通异常、Unconfined 下混合 `tryLoad`，回调只在被取消时结束时调用方都能结束且 `cancelAndJoin` 返回前回调已退出，并校验取消原因类型）、嵌套（含新根 scope 绕开检测后 `load` 替换外层、`tryLoad` 判忙穿透外层、`cancelAndJoin` 取消外层，以及继承上下文的独立协程在加载结束后仍被判为嵌套）、Unconfined 下运行中和排队中调用方 `finally` 内联重入（含被替换时 `tryLoad` 判忙、被 `cancelAndJoin` 取消时运行中调用方的 `tryLoad` 立即执行而排队调用方的 `tryLoad` 判忙、被 `cancelAndJoin` 取消时 `finally` 内发起的加载保持运行且不被取消或等待，以及排队调用方被替换时 `cancelAndJoin` 取消新 `load`）、Unconfined 收集者在 `isLoading` 变化时内联调用 `load`、`tryLoad` 和 `cancelAndJoin`、`loadingFlow`（含普通异常、排队加载被替换和 `tryLoad` 被替换）、`stateFlow` 序列和只读 |
+| `LoaderTest` | 加载结果、取消（含先被替换再被 `cancelAndJoin` 取消时保留替换原因，先被替换或被 `cancelAndJoin` 取消再被调用方取消时保留最先原因，`onLoad` 捕获取消后抛出其他取消异常，以及已取消的调用方不妨碍之后的 `load` 替换运行中的加载）、忙状态（含忙异常不取消调用方，以及判忙后 `load` 仍能替换运行中的加载）、排队（含旧任务结束后恢复前被 `cancelAndJoin` 取消且此时 `tryLoad` 仍判忙，`cancelAndJoin` 在旧任务清理结束后仍等被取消的排队任务退出，新 `load` 不等被它替换的排队任务退出，排队任务刚登记就被调用方取消后旧任务仍被取消，以及旧任务调用方取消后新 `load` 与 `cancelAndJoin` 等待清理且保留调用方原因）、多线程（含 `onLoad` 抛普通异常、Unconfined 下混合 `tryLoad`，回调只在被取消时结束时调用方都能结束且 `cancelAndJoin` 返回前回调已退出，并校验取消原因类型）、嵌套（含新根 scope 绕开检测后 `load` 替换外层、`tryLoad` 判忙穿透外层、`cancelAndJoin` 取消外层，以及继承上下文的独立协程在加载结束后仍被判为嵌套）、Unconfined 下运行中和排队中调用方 `finally` 内联重入（含被替换时 `tryLoad` 判忙、被 `cancelAndJoin` 取消时运行中调用方的 `tryLoad` 立即执行而排队调用方的 `tryLoad` 判忙、被 `cancelAndJoin` 取消时 `finally` 内发起的加载保持运行且不被取消或等待，以及排队调用方被替换时 `cancelAndJoin` 取消新 `load`）、Unconfined 收集者在 `isLoading` 变化时内联调用 `load`、`tryLoad` 和 `cancelAndJoin`、`loadingFlow`（含普通异常、排队加载被替换、`tryLoad` 被替换，以及取值和只读） |
 | `LoaderCallbackTest` | `load` 与 `tryLoad` 的异常包装、子协程生命周期（含回调抛取消异常时子协程收到同一原因并等待清理、子协程内其他 Loader 的忙异常不传播，以及独立 scope 启动的协程不延长加载）、线程上下文安装期间的取消、回调内的嵌套调用（含被拦截后新的 `load` 仍能替换外层加载）和 Flow 上下文约束 |
 | `LoaderQueuedCleanupTest` | `load` 与 `tryLoad` 发起的任务在排队调用方取消或超时后仍保持忙状态和清理等待，以及之后的新 `load` 等待清理后执行 |
 | `LoaderReferenceTest` | `load` 与 `tryLoad` 在成功、普通异常和取消异常退出后释放结果、异常数据及回调闭包捕获的对象，被替换或 `cancelAndJoin` 取消后释放回调闭包捕获的对象（含替换它的新加载仍在运行时），以及排队加载被替换、被 `cancelAndJoin` 取消或被调用方取消后释放回调闭包，被调用方取消后释放异常数据（含旧任务仍在清理时，排队加载被替换或被 `cancelAndJoin` 取消后释放回调闭包，排队调用方取消后释放回调闭包和取消数据） |

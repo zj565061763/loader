@@ -2,14 +2,10 @@ package com.sd.lib.loader
 
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.coroutineScope
-import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.channelFlow
-import kotlinx.coroutines.flow.distinctUntilChanged
-import kotlinx.coroutines.flow.map
-import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.withTimeoutOrNull
@@ -18,16 +14,16 @@ import kotlin.coroutines.cancellation.CancellationException
 /** 协调加载任务，支持取消旧任务或在繁忙时拒绝新任务 */
 interface FLoader {
   /**
-   * 状态流，仅用于展示状态。
-   * `isLoading`变为 false 时加载尚未结束，此时调用[load]或[cancelAndJoin]仍会取消它并丢弃加载结果；
+   * 加载状态流，仅用于展示状态，快速变化的中间值可能被合并。
+   * 变为 false 时加载尚未结束，此时调用[load]或[cancelAndJoin]仍会取消它并丢弃加载结果；
    * 需要接着加载时，请在[load]返回后再调用。
    */
-  val stateFlow: StateFlow<State>
+  val loadingFlow: StateFlow<Boolean>
 
   /**
    * 是否正在加载中，仅用于展示状态。
    * 新旧任务切换时可能短暂为 false，不能用来判断[tryLoad]是否会成功。
-   * 变为 false 时加载尚未结束，限制同[stateFlow]。
+   * 变为 false 时加载尚未结束，限制同[loadingFlow]。
    */
   fun isLoading(): Boolean
 
@@ -75,12 +71,6 @@ interface FLoader {
    */
   suspend fun cancelAndJoin()
 
-  /** 加载状态 */
-  data class State(
-    /** 是否正在加载中 */
-    val isLoading: Boolean = false,
-  )
-
   /** 加载被[cancelAndJoin]取消时抛出的取消异常 */
   class ManualCancellationException : CancellationException("Cancelled by cancelAndJoin")
 
@@ -93,13 +83,6 @@ interface FLoader {
 
 /** 创建一个[FLoader] */
 fun FLoader(): FLoader = LoaderImpl()
-
-/**
- * 加载状态流，快速变化的中间值可能被合并。
- * 变为 false 时加载尚未结束，限制同[FLoader.stateFlow]。
- */
-val FLoader.loadingFlow: Flow<Boolean>
-  get() = stateFlow.map { it.isLoading }.distinctUntilChanged()
 
 /** 对[runCatching]的包装，如果是取消异常则抛出 */
 inline fun <R> safeRunCatching(block: () -> R): Result<R> {
@@ -115,11 +98,11 @@ private class LoaderImpl : FLoader {
     newReplaceCause = { FLoader.ReplacedCancellationException() },
     newBusyCause = { FLoader.BusyCancellationException() },
   )
-  private val _stateFlow = MutableStateFlow(FLoader.State())
-  override val stateFlow: StateFlow<FLoader.State> = _stateFlow.asStateFlow()
+  private val _loadingFlow = MutableStateFlow(false)
+  override val loadingFlow: StateFlow<Boolean> = _loadingFlow.asStateFlow()
 
   override fun isLoading(): Boolean {
-    return _stateFlow.value.isLoading
+    return _loadingFlow.value
   }
 
   override suspend fun <T> load(onLoad: suspend () -> T): Result<T> {
@@ -140,14 +123,14 @@ private class LoaderImpl : FLoader {
 
   private suspend fun <T> doLoad(onLoad: suspend () -> T): Result<T> {
     return try {
-      _stateFlow.update { it.copy(isLoading = true) }
+      _loadingFlow.value = true
       // 等待 onLoad 用当前上下文启动的子协程结束，让其异常也包装为 Result.failure
       Result.success(coroutineScope { onLoad() })
     } catch (e: Throwable) {
       if (e is CancellationException) throw e
       Result.failure(e)
     } finally {
-      _stateFlow.update { it.copy(isLoading = false) }
+      _loadingFlow.value = false
     }
   }
 }
