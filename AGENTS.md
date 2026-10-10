@@ -64,7 +64,6 @@
 - `isBusyFlow` 在 `load` 登记或 `tryLoad` 被接受时变为 `true`，所有任务结束后才恢复 `false`，排队中被替换的任务除外；排队等待和重新加载期间一直为 `true`
 - 排队中被新的 `load` 替换的任务不算忙：其他任务都结束后它的调用方可能尚未返回，此时 `isBusy` 为 `false`，`tryLoad` 不判忙；公开 KDoc 必须持续说明这一限制
 - `StateFlow` 可能合并快速更新，收集者不保证收到完整序列
-- `isBusyFlow` 恢复 `false` 时任务已经结束：此时 `tryLoad` 不判忙，新的 `load` 不影响上一次加载的结果
 - Unconfined 收集者会在 `isBusyFlow` 的同步调用中内联执行：变为 `true` 时加载已登记但尚未进入 `onLoad`，内联取消或替换后 `onLoad` 不会执行
 - `Dispatchers.Main.immediate` 上的收集者在主线程同步 `isBusyFlow` 时同样内联执行，它是 `viewModelScope` 和 `lifecycleScope` 的默认调度器
 - 调用方自己也在 Unconfined 或 `Main.immediate` 上内联运行时，收集者不内联执行，要等调用方挂起或结束才运行：变为 `true` 时可能已进入 `onLoad`

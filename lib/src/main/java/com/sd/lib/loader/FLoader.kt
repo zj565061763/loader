@@ -11,9 +11,8 @@ import kotlin.coroutines.cancellation.CancellationException
 interface FLoader {
   /**
    * 是否繁忙的状态流，取值含义同[isBusy]。
-   * 变为 false 时加载已经结束，此时调用[load]不会影响上一次加载的结果。
    * 快速变化的中间值可能被合并。
-   * 多线程下它的值可能略晚于[isBusy]。
+   * 多线程下它的值可能略晚于[isBusy]：收到 false 时其他线程可能已经开始新的加载。
    * 只是状态通知，不能用来先判断再调用[tryLoad]。
    */
   val isBusyFlow: StateFlow<Boolean>
