@@ -17,12 +17,17 @@ import kotlin.coroutines.cancellation.CancellationException
 
 /** 协调加载任务，支持取消旧任务或在繁忙时拒绝新任务 */
 interface FLoader {
-  /** 状态流 */
+  /**
+   * 状态流，仅用于展示状态。
+   * `isLoading`变为 false 时加载尚未结束，此时调用[load]或[cancelAndJoin]仍会取消它并丢弃加载结果；
+   * 需要接着加载时，请在[load]返回后再调用。
+   */
   val stateFlow: StateFlow<State>
 
   /**
    * 是否正在加载中，仅用于展示状态。
    * 新旧任务切换时可能短暂为 false，不能用来判断[tryLoad]是否会成功。
+   * 变为 false 时加载尚未结束，限制同[stateFlow]。
    */
   fun isLoading(): Boolean
 
@@ -38,6 +43,7 @@ interface FLoader {
    *
    * [onLoad]内收到的取消异常也是这些类型。
    * [onLoad]抛出的普通异常会包装为[Result.failure]，[CancellationException]会原样抛出。
+   * [onLoad]内用当前协程上下文启动的子协程结束后加载才结束，子协程的普通异常同样包装为[Result.failure]。
    * [withTimeout]超时的异常也会原样抛出，需要[Result.failure]时请改用[withTimeoutOrNull]或转换为普通异常。
    * 在[onLoad]中调用其他 Loader 时，它被别处取消抛出的[ManualCancellationException]或[ReplacedCancellationException]也会原样抛出，不代表当前 Loader 被取消。
    *
@@ -88,7 +94,10 @@ interface FLoader {
 /** 创建一个[FLoader] */
 fun FLoader(): FLoader = LoaderImpl()
 
-/** 加载状态流，快速变化的中间值可能被合并 */
+/**
+ * 加载状态流，快速变化的中间值可能被合并。
+ * 变为 false 时加载尚未结束，限制同[FLoader.stateFlow]。
+ */
 val FLoader.loadingFlow: Flow<Boolean>
   get() = stateFlow.map { it.isLoading }.distinctUntilChanged()
 

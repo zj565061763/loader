@@ -64,6 +64,8 @@
 - `isLoading` 在调用 `onLoad` 前设为 `true`，并在 `finally` 中恢复为 `false`。重新加载时会依次更新为 `false`、`true`，但 `StateFlow` 可能合并快速更新，收集者不保证收到完整序列
 - `isLoading` 在任务内更新，恢复 `false` 时任务尚未结束：此时 `tryLoad` 仍判忙，新的 `load` 或 `cancelAndJoin` 仍会取消它，`onLoad` 已返回的结果被丢弃
 - Unconfined 收集者会在 `isLoading` 的更新调用中内联执行：变为 `true` 时内联取消或替换加载，`onLoad` 仍会执行到第一个挂起点
+- `Dispatchers.Main.immediate` 上的收集者在主线程更新 `isLoading` 时同样内联执行，它是 `viewModelScope` 和 `lifecycleScope` 的默认调度器
+- `isLoading` 恢复 `false` 时任务尚未结束，公开 KDoc 必须持续说明这一限制
 
 ### `FMutator`
 
@@ -88,6 +90,8 @@
 - 任务结束时在锁内清空等于自己的字段
 - `cancelAndJoin` 在锁内读取两个字段，全部取消后再逐个等待：先等 `_job`，再等 `_runningJob`
 - `cancelAndJoin` 等 `_runningJob` 时不能再引用 `_job`，原因同 `mutate`；不能把两个任务放进集合后一起等待
+- `cancelAndJoin` 等 `_job` 期间仍引用 `_runningJob`：运行任务先结束时，它和调用方的回调闭包要等被取消的排队任务退出才能释放
+- 上述持有是已接受的限制，审查时不作为 bug 上报：持有时间只有排队任务等到一次调度那么长
 - `cancelAndJoin` 要取消和等待的任务必须在发起取消前一次读出，之后不能再读两个字段：`Unconfined` 下取消会内联执行调用方的 `finally`，其中发起的加载不属于本次取消，不能被取消或等待
 - `cancelAndJoin` 不能只等待 `_runningJob`：被取消的排队任务可能晚于它退出，提前返回后 `tryLoad` 仍会判忙
 - `cancelAndJoin` 必须先取消 `_job` 再取消 `_runningJob`，顺序不能调换：运行任务在 `Unconfined` 上时会在取消时内联结束，先取消它会让尚未取消的排队任务立即开始执行
