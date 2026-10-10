@@ -21,6 +21,7 @@ interface FLoader {
 
   /**
    * 是否繁忙，即是否有尚未结束的加载，等待中或取消后仍在清理的也算。
+   * 等待中就被新的[load]替换的加载不算，它可能在不繁忙之后才抛出[ReplacedCancellationException]。
    * 繁忙时[tryLoad]会抛出[BusyCancellationException]。
    * 只是调用时刻的快照，不能用来先判断再调用[tryLoad]。
    */

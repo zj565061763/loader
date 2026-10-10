@@ -5,12 +5,12 @@
 ### ⚠️ Breaking Changes
 
 - **移除 `stateFlow`、`FLoader.State`、`loadingFlow` 和 `isLoading()`**：请改用新增的 `isBusyFlow` 和 `isBusy()`。
-- **状态的含义由“正在执行 `onLoad`”变为“繁忙”**：`isBusyFlow` 在 `load` 被调用或 `tryLoad` 被接受时变为 `true`，等待上一次加载清理期间也是 `true`，所有加载都结束后才变为 `false`。重新加载时的状态序列由 `false, true, false, true, false` 变为 `false, true, false`。
+- **状态的含义由“正在执行 `onLoad`”变为“繁忙”**：`isBusyFlow` 在 `load` 被调用或 `tryLoad` 被接受时变为 `true`，等待上一次加载清理期间也是 `true`，所有加载都结束后才变为 `false`，等待中就被替换的加载除外。重新加载时的状态序列由 `false, true, false, true, false` 变为 `false, true, false`。
 
 ### ✨ Improvements
 
 - **新增 `FLoader.isBusyFlow`**：是否繁忙的状态流，类型为 `StateFlow<Boolean>`。它变为 `false` 时加载已经结束，在收集者里接着调用 `load` 不会影响上一次加载的结果；此前在 `loadingFlow` 变为 `false` 时调用 `load`，可能取消刚完成的加载并丢弃它的结果。
-- **新增 `FLoader.isBusy()`**：有尚未结束的加载时返回 `true`，等待中或取消后仍在清理的也算，此时 `tryLoad` 会抛出 `BusyCancellationException`。它只是调用时刻的快照，不能用来先判断再调用 `tryLoad`。
+- **新增 `FLoader.isBusy()`**：有尚未结束的加载时返回 `true`，等待中或取消后仍在清理的也算，此时 `tryLoad` 会抛出 `BusyCancellationException`。等待中就被新的 `load` 替换的加载不算，它可能在不繁忙之后才抛出 `ReplacedCancellationException`。它只是调用时刻的快照，不能用来先判断再调用 `tryLoad`。
 
 ### 🐛 Bug Fixes
 
