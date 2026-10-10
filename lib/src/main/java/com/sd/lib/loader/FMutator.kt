@@ -72,11 +72,13 @@ internal class FMutator(
 
   suspend fun cancelAndJoin() {
     _mutateMutex.checkNested()
+
     val (job, runningJob) = synchronized(_lock) {
       _job to _runningJob.takeIf { it !== _job }
     }
     job?.cancel(newCancelCause())
     runningJob?.cancel(newCancelCause())
+
     // 逐个等待，等 runningJob 时不能再引用 job，否则它结束后仍被持有
     job?.join()
     runningJob?.join()
