@@ -81,7 +81,7 @@ class LoaderQueuedCleanupTest(private val useTryLoad: Boolean) {
 
     advanceUntilIdle()
     assertEquals("1", container)
-    assertEquals(false, loader.loadingFlow.value)
+    assertEquals(false, loader.isBusyFlow.value)
     loader.tryLoad { container += "3" }.getOrThrow()
     assertEquals("13", container)
   }
@@ -94,7 +94,7 @@ class LoaderQueuedCleanupTest(private val useTryLoad: Boolean) {
     val container = mutableListOf<String>()
     var queuedCause: Throwable? = null
 
-    loader.loadingFlow.test {
+    loader.isBusyFlow.test {
       assertEquals(false, awaitItem())
       val loading = launch {
         loader.loadForTest {
@@ -135,7 +135,7 @@ class LoaderQueuedCleanupTest(private val useTryLoad: Boolean) {
         assertTrue(queuedCause is TimeoutCancellationException)
         assertTrue(queued.await() is TimeoutCancellationException)
         assertEquals(false, loading.isCompleted)
-        assertEquals(true, loader.loadingFlow.value)
+        assertEquals(true, loader.isBusyFlow.value)
         assertEquals(emptyList<String>(), container)
         assertEquals(startTime + 100, currentTime)
         assertTrue(runCatching { loader.tryLoad { container.add("try-load") } }.exceptionOrNull() is FLoader.BusyCancellationException)
@@ -147,7 +147,7 @@ class LoaderQueuedCleanupTest(private val useTryLoad: Boolean) {
         loading.join()
         assertEquals(listOf("old-cleaned"), container)
         assertEquals(false, awaitItem())
-        assertEquals(false, loader.loadingFlow.value)
+        assertEquals(false, loader.isBusyFlow.value)
       } finally {
         releaseCleanup.complete(Unit)
         loading.cancelAndJoin()
@@ -198,7 +198,7 @@ class LoaderQueuedCleanupTest(private val useTryLoad: Boolean) {
     assertEquals(true, loadingJob.isCompleted)
     assertEquals(startTime + 1000, currentTime)
     assertEquals("13", container)
-    assertEquals(false, loader.loadingFlow.value)
+    assertEquals(false, loader.isBusyFlow.value)
     assertEquals(4, loader.tryLoad { 4 }.getOrThrow())
   }
 
@@ -238,7 +238,7 @@ class LoaderQueuedCleanupTest(private val useTryLoad: Boolean) {
       }
     }.also { runCurrent() }
     assertEquals(false, next.isCompleted)
-    assertEquals(true, loader.loadingFlow.value)
+    assertEquals(true, loader.isBusyFlow.value)
     assertEquals(emptyList<String>(), container)
 
     advanceUntilIdle()
@@ -246,7 +246,7 @@ class LoaderQueuedCleanupTest(private val useTryLoad: Boolean) {
     assertEquals(2, next.await().getOrThrow())
     assertEquals(listOf("old-cleaned", "new-load"), container)
     assertEquals(startTime + 1000, currentTime)
-    assertEquals(false, loader.loadingFlow.value)
+    assertEquals(false, loader.isBusyFlow.value)
     assertEquals(3, loader.tryLoad { 3 }.getOrThrow())
   }
 
@@ -301,7 +301,7 @@ class LoaderQueuedCleanupTest(private val useTryLoad: Boolean) {
     assertEquals(true, loadingJob.isCompleted)
     assertEquals(startTime + 1000, currentTime)
     assertEquals("15", container)
-    assertEquals(false, loader.loadingFlow.value)
+    assertEquals(false, loader.isBusyFlow.value)
     assertEquals(6, loader.tryLoad { 6 }.getOrThrow())
   }
 

@@ -5,6 +5,9 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 
 internal class FMutator(
   /** 创建[cancelAndJoin]取消任务的异常 */
@@ -26,6 +29,11 @@ internal class FMutator(
   /** 串行执行用户 block，并提供同一实例的嵌套调用检测 */
   private val _mutateMutex = FMutex()
 
+  private val _isBusyFlow = MutableStateFlow(false)
+
+  /** [isBusy]的状态流，快速变化的中间值可能被合并 */
+  val isBusyFlow: StateFlow<Boolean> = _isBusyFlow.asStateFlow()
+
   suspend fun <T> mutate(block: suspend () -> T): T {
     _mutateMutex.checkNested()
     return coroutineScope {
@@ -38,6 +46,7 @@ internal class FMutator(
         (_job to _runningJob).also { _job = mutateJob }
       }
       prevJob?.cancel(newReplaceCause())
+      syncBusyFlow()
       // 等待期间不能再引用 prevJob，否则它结束后仍被持有
       runningJob?.join()
 
@@ -65,6 +74,7 @@ internal class FMutator(
         _job = mutateJob
         _runningJob = mutateJob
       }
+      syncBusyFlow()
 
       doMutate(block)
     }
@@ -97,7 +107,17 @@ internal class FMutator(
         if (_job === this) _job = null
         if (_runningJob === this) _runningJob = null
       }
+      syncBusyFlow()
     }
+  }
+
+  /** 把[isBusy]同步到[isBusyFlow]，在锁外赋值，收集者可能在赋值调用中内联执行 */
+  private fun syncBusyFlow() {
+    do {
+      val busy = isBusy()
+      _isBusyFlow.value = busy
+      // 赋值期间登记变了的话，刚赋的值可能已经过期，重新同步
+    } while (isBusy() != busy)
   }
 
   private suspend fun <T> doMutate(block: suspend () -> T): T {

@@ -59,13 +59,14 @@
 - 调用方已取消时，`cancelAndJoin` 仍必须发起取消，只是不保证等待完成，与 `Job.cancelAndJoin()` 一致
 - 已取消的调用方不能取消其他加载，也不能妨碍之后的 `load` 替换运行中的加载：`mutate` 进入时先检查 `ensureActive`，再登记并取消上一个任务
 - `doLoad` 只把普通异常转换为 `Result.failure`；`CancellationException` 必须重新抛出，不能被包装或吞掉。公开的 `safeRunCatching` 也遵循相同规则
-- `doLoad` 必须用 `coroutineScope` 包裹 `onLoad`：`onLoad` 用当前上下文启动的子协程挂在这个 scope 上，否则子协程的普通异常会绕过 `Result.failure`，`loadingFlow` 也会在子协程结束前变为 `false`
-- `loadingFlow` 通过 `asStateFlow()` 对外只读，使用方不能强转成 `MutableStateFlow` 修改状态
-- `loadingFlow` 在调用 `onLoad` 前设为 `true`，并在 `finally` 中恢复为 `false`。重新加载时会依次更新为 `false`、`true`，但 `StateFlow` 可能合并快速更新，收集者不保证收到完整序列
-- `loadingFlow` 在任务内更新，恢复 `false` 时任务尚未结束：此时 `tryLoad` 仍判忙，新的 `load` 或 `cancelAndJoin` 仍会取消它，`onLoad` 已返回的结果被丢弃
-- Unconfined 收集者会在 `loadingFlow` 的更新调用中内联执行：变为 `true` 时内联取消或替换加载，`onLoad` 仍会执行到第一个挂起点
-- `Dispatchers.Main.immediate` 上的收集者在主线程更新 `loadingFlow` 时同样内联执行，它是 `viewModelScope` 和 `lifecycleScope` 的默认调度器
-- `loadingFlow` 恢复 `false` 时任务尚未结束，公开 KDoc 必须持续说明这一限制
+- `doLoad` 必须用 `coroutineScope` 包裹 `onLoad`：`onLoad` 用当前上下文启动的子协程挂在这个 scope 上，否则子协程的普通异常会绕过 `Result.failure`
+- `isBusyFlow` 直接返回 `FMutator.isBusyFlow`，对外只读，使用方不能强转成 `MutableStateFlow` 修改状态
+- `isBusyFlow` 在 `load` 登记或 `tryLoad` 被接受时变为 `true`，所有任务结束后才恢复 `false`；排队等待和重新加载期间一直为 `true`
+- `StateFlow` 可能合并快速更新，收集者不保证收到完整序列
+- `isBusyFlow` 恢复 `false` 时任务已经结束：此时 `tryLoad` 不判忙，新的 `load` 不影响上一次加载的结果
+- Unconfined 收集者会在 `isBusyFlow` 的同步调用中内联执行：变为 `true` 时加载已登记但尚未进入 `onLoad`，内联取消或替换后 `onLoad` 不会执行
+- `Dispatchers.Main.immediate` 上的收集者在主线程同步 `isBusyFlow` 时同样内联执行，它是 `viewModelScope` 和 `lifecycleScope` 的默认调度器
+- `isBusyFlow` 只是状态通知，可能短暂落后于 `isBusy`，不能用来先判断再 `tryLoad`；公开 KDoc 必须持续说明这一限制
 - `isBusy` 直接返回 `FMutator.isBusy()`，与 `tryLoad` 的判忙是同一个判断
 - `isBusy` 不做嵌套检查，在 `onLoad` 内调用返回 `true`
 - `isBusy` 只是调用时刻的快照，不能用来先判断再 `tryLoad`；公开 KDoc 必须持续说明这一限制
@@ -89,6 +90,11 @@
 - `mutateOrThrow` 在锁内调用 `isBusy` 判忙，不忙则把自己同时设为两者；它不取消也不等待任何任务
 - 判忙的条件只写在 `isBusy` 里，`mutateOrThrow` 不能另写一份
 - `isBusy` 只是调用时刻的快照，不能用来先判断再 `mutateOrThrow`：判忙与登记必须在同一次加锁中完成
+- `isBusyFlow` 的值只从 `isBusy` 读出，由 `syncBusyFlow` 同步，通过 `asStateFlow()` 对外只读
+- `mutate` 登记并取消上一个任务之后、`mutateOrThrow` 登记之后、任务结束清空登记之后各同步一次
+- `syncBusyFlow` 必须在 `_lock` 外赋值：Unconfined 或 `Main.immediate` 上的收集者会在赋值调用中内联执行，锁内不能运行外部代码
+- `syncBusyFlow` 赋值后必须复查 `isBusy`，变了就重新同步：只赋值一次时，一个线程读到的旧值可能晚于另一个线程的新值赋上去，状态流会停在过期的值上
+- 任务结束时的同步在结束回调里执行，此时任务已完成、调用方尚未恢复：单线程下 `load` 返回时状态流已恢复 `false`
 - 判忙看任务是否完成，不看是否活动：已被取消但尚未退出的排队任务也算忙
 - 判忙也不看字段是否为 `null`：任务完成到清空登记之间，字段仍指向已完成的任务，此时不算忙
 - 判忙的 `mutateOrThrow` 不改动两个字段，否则之后的 `load` 取消不到运行中的任务，会一直等待
@@ -125,7 +131,7 @@
 - 测试方法名使用反引号包裹的英文句子，例如 ``fun `test load when loading`() = runTest { ... }``
 - 跨协程边界验证异常原始实例时使用带业务字段的异常，避免调试模式的堆栈恢复复制异常
 - 验证并发执行顺序时，通常向字符串或列表形式的 `container` 追加标记
-- 修改并发逻辑时至少覆盖成功、普通异常、取消、忙状态、嵌套调用、锁释放和 `loadingFlow` 状态序列
+- 修改并发逻辑时至少覆盖成功、普通异常、取消、忙状态、嵌套调用、锁释放和 `isBusyFlow` 状态序列
 - 引用释放测试在 `runTest` 退出后等待真实 GC，并保持 loader 存活且不再发起加载
 - 验证清理期间的引用释放时，用独立根 scope 保持旧任务清理挂起，GC 检查后再放行
 - 排队加载结束后的引用释放必须在旧任务清理期间验证：替换它的 `load` 和 `cancelAndJoin` 此时还在等待，放行清理后再检查发现不了它们的持有
@@ -151,14 +157,16 @@
 - 拆成两次加锁没有便宜的确定性用例，试过后维持靠审查：持锁用例发现不了，拆开后每一半仍各自加锁；专门制造这个竞态的压力用例 20 万轮也有漏掉的；在库内加测试钩子只能固定钩子位置
 - 判忙从任务未完成改成字段非 `null` 有持锁用例保护：持锁期间让任务结束，它的清空被锁挡住，此时在持锁线程上调用 `isBusy` 必须返回 `false`
 - 上述用例依赖 `_lock` 可重入，以及 `mutateOrThrow` 的判忙复用 `isBusy`
+- `syncBusyFlow` 在锁外赋值有用例保护：让 Unconfined 收集者卡在赋值调用里，再断言其他线程的 `isBusy` 没有停在 `BLOCKED`
+- `syncBusyFlow` 去掉赋值后的复查，没有用例能发现，改动时靠审查：出错需要线程恰好在读取和赋值之间被抢占，多线程压力 3000 轮撞不上
 
 | 测试类 | 覆盖范围 |
 |---|---|
-| `LoaderTest` | 加载结果、取消（含先被替换再被 `cancelAndJoin` 取消时保留替换原因，先被替换或被 `cancelAndJoin` 取消再被调用方取消时保留最先原因，`onLoad` 捕获取消后抛出其他取消异常，以及已取消的调用方不妨碍之后的 `load` 替换运行中的加载）、忙状态（含忙异常不取消调用方，判忙后 `load` 仍能替换运行中的加载，以及 `isBusy` 在回调内、取消后清理期间和排队加载尚未恢复时为忙）、排队（含旧任务结束后恢复前被 `cancelAndJoin` 取消且此时 `tryLoad` 仍判忙，`cancelAndJoin` 在旧任务清理结束后仍等被取消的排队任务退出，新 `load` 不等被它替换的排队任务退出，排队任务刚登记就被调用方取消后旧任务仍被取消，以及旧任务调用方取消后新 `load` 与 `cancelAndJoin` 等待清理且保留调用方原因）、多线程（含 `onLoad` 抛普通异常、Unconfined 下混合 `tryLoad`，回调只在被取消时结束时调用方都能结束且 `cancelAndJoin` 返回前回调已退出，并校验取消原因类型）、嵌套（含新根 scope 绕开检测后 `load` 替换外层、`tryLoad` 判忙穿透外层、`cancelAndJoin` 取消外层，以及继承上下文的独立协程在加载结束后仍被判为嵌套）、Unconfined 下运行中和排队中调用方 `finally` 内联重入（含被替换时 `tryLoad` 判忙、被 `cancelAndJoin` 取消时运行中调用方的 `tryLoad` 立即执行而排队调用方的 `tryLoad` 判忙、被 `cancelAndJoin` 取消时 `finally` 内发起的加载保持运行且不被取消或等待，以及排队调用方被替换时 `cancelAndJoin` 取消新 `load`）、Unconfined 收集者在 `loadingFlow` 变化时内联调用 `load`、`tryLoad` 和 `cancelAndJoin`、`loadingFlow`（含普通异常、排队加载被替换、`tryLoad` 被替换，以及取值和只读） |
+| `LoaderTest` | 加载结果、取消（含先被替换再被 `cancelAndJoin` 取消时保留替换原因，先被替换或被 `cancelAndJoin` 取消再被调用方取消时保留最先原因，`onLoad` 捕获取消后抛出其他取消异常，以及已取消的调用方不妨碍之后的 `load` 替换运行中的加载）、忙状态（含忙异常不取消调用方，判忙后 `load` 仍能替换运行中的加载，以及 `isBusy` 在回调内、取消后清理期间和排队加载尚未恢复时为忙）、排队（含旧任务结束后恢复前被 `cancelAndJoin` 取消且此时 `tryLoad` 仍判忙，`cancelAndJoin` 在旧任务清理结束后仍等被取消的排队任务退出，新 `load` 不等被它替换的排队任务退出，排队任务刚登记就被调用方取消后旧任务仍被取消，以及旧任务调用方取消后新 `load` 与 `cancelAndJoin` 等待清理且保留调用方原因）、多线程（含 `onLoad` 抛普通异常、Unconfined 下混合 `tryLoad`，回调只在被取消时结束时调用方都能结束且 `cancelAndJoin` 返回前回调已退出，并校验取消原因类型）、嵌套（含新根 scope 绕开检测后 `load` 替换外层、`tryLoad` 判忙穿透外层、`cancelAndJoin` 取消外层，以及继承上下文的独立协程在加载结束后仍被判为嵌套）、Unconfined 下运行中和排队中调用方 `finally` 内联重入（含被替换时 `tryLoad` 判忙、被 `cancelAndJoin` 取消时运行中调用方的 `tryLoad` 立即执行而排队调用方的 `tryLoad` 判忙、被 `cancelAndJoin` 取消时 `finally` 内发起的加载保持运行且不被取消或等待，以及排队调用方被替换时 `cancelAndJoin` 取消新 `load`）、Unconfined 收集者在 `isBusyFlow` 变化时内联调用 `load`、`tryLoad` 和 `cancelAndJoin`（含变为 `true` 时取消或替换后 `onLoad` 不执行，恢复 `false` 时不影响上一次加载的结果且 `tryLoad` 不判忙）、`isBusyFlow`（含普通异常、重新加载、排队加载被替换和 `tryLoad` 被替换时没有多余的翻转，以及取值和只读） |
 | `LoaderCallbackTest` | `load` 与 `tryLoad` 的异常包装、子协程生命周期（含回调抛取消异常时子协程收到同一原因并等待清理、子协程内其他 Loader 的忙异常不传播，以及独立 scope 启动的协程不延长加载）、线程上下文安装期间的取消、回调内的嵌套调用（含被拦截后新的 `load` 仍能替换外层加载）和 Flow 上下文约束 |
 | `LoaderQueuedCleanupTest` | `load` 与 `tryLoad` 发起的任务在排队调用方取消或超时后仍保持忙状态和清理等待，以及之后的新 `load` 等待清理后执行 |
 | `LoaderReferenceTest` | `load` 与 `tryLoad` 在成功、普通异常和取消异常退出后释放结果、异常数据及回调闭包捕获的对象，被替换或 `cancelAndJoin` 取消后释放回调闭包捕获的对象（含替换它的新加载仍在运行时），以及排队加载被替换、被 `cancelAndJoin` 取消或被调用方取消后释放回调闭包，被调用方取消后释放异常数据（含旧任务仍在清理时，排队加载被替换或被 `cancelAndJoin` 取消后释放回调闭包，排队调用方取消后释放回调闭包和取消数据） |
-| `MutatorTest` | 已取消调用方的任务登记（含多线程下不让空闲 Loader 变忙）、已登记 `load` 与 `tryLoad` 的取消和替换、上下文探针的暂停位置，新任务登记后尚未发起取消时的排队任务替换、手动取消和忙状态，进入时没有运行任务的任务在新任务登记后尚未发起取消时也不执行，被顶替的排队任务不登记为运行任务，`cancelAndJoin` 的取消顺序，`isBusy` 在任务各阶段的取值（含排队任务尚未恢复时和排队任务结束后旧任务仍在清理时算忙，任务完成到清空登记之间不算忙），以及任务结束时的清空、`cancelAndJoin` 的读取和 `isBusy` 的读取在锁内执行 |
+| `MutatorTest` | 已取消调用方的任务登记（含多线程下不让空闲 Loader 变忙）、已登记 `load` 与 `tryLoad` 的取消和替换、上下文探针的暂停位置，新任务登记后尚未发起取消时的排队任务替换、手动取消和忙状态，进入时没有运行任务的任务在新任务登记后尚未发起取消时也不执行，被顶替的排队任务不登记为运行任务，`cancelAndJoin` 的取消顺序，`isBusy` 在任务各阶段的取值（含排队任务尚未恢复时和排队任务结束后旧任务仍在清理时算忙，任务完成到清空登记之间不算忙），`isBusyFlow` 在任务各阶段的取值和序列（含登记后进入 block 前已为 `true`，排队和接替执行期间没有多余的翻转，判忙的调用不改变状态，以及多线程下旧任务结束与新任务登记并发后与登记一致），`isBusyFlow` 在锁外赋值，以及任务结束时的清空、`cancelAndJoin` 的读取和 `isBusy` 的读取在锁内执行 |
 | `MutexTest` | 互斥（含多线程和 Unconfined）、锁释放（含 `action` 抛出取消异常，以及吞掉取消后正常返回时仍抛出）、嵌套（含子协程、隔着其他实例回到同一实例，新根 scope 绕开检测后等待锁，以及继承上下文的独立协程在锁释放后仍被判为嵌套）和 Flow 上下文约束 |
 
 ## 审查约定

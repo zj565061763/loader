@@ -2,9 +2,7 @@ package com.sd.lib.loader
 
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.coroutineScope
-import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.channelFlow
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
@@ -14,12 +12,12 @@ import kotlin.coroutines.cancellation.CancellationException
 /** 协调加载任务，支持取消旧任务或在繁忙时拒绝新任务 */
 interface FLoader {
   /**
-   * 加载状态流，仅用于展示状态，快速变化的中间值可能被合并。
-   * 新旧任务切换时可能短暂为 false，不能用来判断[tryLoad]是否会成功，是否繁忙以[isBusy]为准。
-   * 变为 false 时加载尚未结束，此时调用[load]或[cancelAndJoin]仍会取消它并丢弃加载结果；
-   * 需要接着加载时，请在[load]返回后再调用。
+   * 是否繁忙的状态流，取值含义同[isBusy]。
+   * 变为 false 时加载已经结束，此时调用[load]不会影响上一次加载的结果。
+   * 快速变化的中间值可能被合并，多线程下可能略晚于[isBusy]。
+   * 只是状态通知，不能用来先判断再调用[tryLoad]。
    */
-  val loadingFlow: StateFlow<Boolean>
+  val isBusyFlow: StateFlow<Boolean>
 
   /**
    * 是否繁忙，即是否有尚未结束的加载，等待中或取消后仍在清理的也算。
@@ -99,8 +97,7 @@ private class LoaderImpl : FLoader {
     newReplaceCause = { FLoader.ReplacedCancellationException() },
     newBusyCause = { FLoader.BusyCancellationException() },
   )
-  private val _loadingFlow = MutableStateFlow(false)
-  override val loadingFlow: StateFlow<Boolean> = _loadingFlow.asStateFlow()
+  override val isBusyFlow: StateFlow<Boolean> = _mutator.isBusyFlow
 
   override fun isBusy(): Boolean {
     return _mutator.isBusy()
@@ -124,14 +121,11 @@ private class LoaderImpl : FLoader {
 
   private suspend fun <T> doLoad(onLoad: suspend () -> T): Result<T> {
     return try {
-      _loadingFlow.value = true
       // 等待 onLoad 用当前上下文启动的子协程结束，让其异常也包装为 Result.failure
       Result.success(coroutineScope { onLoad() })
     } catch (e: Throwable) {
       if (e is CancellationException) throw e
       Result.failure(e)
-    } finally {
-      _loadingFlow.value = false
     }
   }
 }

@@ -17,6 +17,9 @@ import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.collectIndexed
+import kotlinx.coroutines.flow.drop
+import kotlinx.coroutines.flow.take
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.TestCoroutineScheduler
@@ -37,6 +40,7 @@ import java.util.concurrent.atomic.AtomicInteger
 import kotlin.coroutines.AbstractCoroutineContextElement
 import kotlin.coroutines.CoroutineContext
 import kotlin.coroutines.cancellation.CancellationException
+import kotlin.time.Duration.Companion.seconds
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class MutatorTest {
@@ -83,7 +87,7 @@ class MutatorTest {
 
       assertEquals(1, caller.await().getOrThrow())
       assertEquals(true, callbackEntered.get())
-      assertEquals(false, loader.loadingFlow.value)
+      assertEquals(false, loader.isBusyFlow.value)
       assertEquals(3, loader.tryLoad { 3 }.getOrThrow())
     }
   }
@@ -141,7 +145,7 @@ class MutatorTest {
 
       assertSame(cause, thrown)
       assertEquals(false, callbackEntered.get())
-      assertEquals(false, loader.loadingFlow.value)
+      assertEquals(false, loader.isBusyFlow.value)
       assertEquals(3, loader.tryLoad { 3 }.getOrThrow())
     }
   }
@@ -855,6 +859,150 @@ class MutatorTest {
     }
   }
 
+  @Test
+  fun `test isBusyFlow follows task lifecycle`() = runTest {
+    val mutator = newMutator()
+    val values = mutableListOf<Boolean>()
+    val collector = launch(Dispatchers.Unconfined) { mutator.isBusyFlow.collect { values.add(it) } }
+    val releaseCleanup = CompletableDeferred<Unit>()
+
+    try {
+      // 登记后、进入 block 前已同步为 true，任务结束后同步为 false
+      assertEquals(false, mutator.isBusyFlow.value)
+      assertEquals(true, mutator.mutate { mutator.isBusyFlow.value })
+      assertEquals(false, mutator.isBusyFlow.value)
+      assertEquals(true, mutator.mutateOrThrow { mutator.isBusyFlow.value })
+      assertEquals(false, mutator.isBusyFlow.value)
+      assertEquals(listOf(false, true, false, true, false), values)
+
+      val first = async {
+        runCatching {
+          mutator.mutate {
+            try {
+              awaitCancellation()
+            } finally {
+              withContext(NonCancellable) { releaseCleanup.await() }
+            }
+          }
+        }.exceptionOrNull()
+      }.also { runCurrent() }
+      val queued = async { mutator.mutate { 2 } }.also { runCurrent() }
+      assertEquals(false, first.isCompleted)
+      assertEquals(true, mutator.isBusyFlow.value)
+
+      // 判忙的调用不改变状态
+      assertTrue(runCatching { mutator.mutateOrThrow { 3 } }.exceptionOrNull() is FLoader.BusyCancellationException)
+      assertEquals(true, mutator.isBusyFlow.value)
+
+      releaseCleanup.complete(Unit)
+      assertEquals(2, queued.await())
+      assertTrue(first.await() is FLoader.ReplacedCancellationException)
+      assertEquals(false, mutator.isBusyFlow.value)
+
+      // 旧任务清理、排队任务等待和接替执行期间一直为 true，没有多余的翻转
+      assertEquals(listOf(false, true, false, true, false, true, false), values)
+    } finally {
+      releaseCleanup.complete(Unit)
+      collector.cancelAndJoin()
+    }
+  }
+
+  @Test(timeout = 10_000)
+  fun `test isBusyFlow is updated outside lock for load`() = runTest {
+    checkBusyFlowUpdatedOutsideLock(useTryLoad = false)
+  }
+
+  @Test(timeout = 10_000)
+  fun `test isBusyFlow is updated outside lock for tryLoad`() = runTest {
+    checkBusyFlowUpdatedOutsideLock(useTryLoad = true)
+  }
+
+  // 旧任务结束与新任务登记并发，两边的同步都返回后状态流必须与登记一致
+  @Test(timeout = 20_000)
+  fun `test isBusyFlow is true after concurrent completion and registration on multiple threads`() = runTest(timeout = 20.seconds) {
+    withContext(Dispatchers.Default) {
+      repeat(3000) {
+        val mutator = newMutator()
+        val firstEntered = CompletableDeferred<Unit>()
+        val finishFirst = CompletableDeferred<Unit>()
+        val secondEntered = CompletableDeferred<Unit>()
+        val releaseSecond = CompletableDeferred<Unit>()
+        coroutineScope {
+          val first = launch {
+            runCatching {
+              mutator.mutate {
+                firstEntered.complete(Unit)
+                finishFirst.await()
+              }
+            }
+          }
+          firstEntered.await()
+
+          // 旧任务结束与新任务登记并发
+          val second = launch {
+            mutator.mutate {
+              secondEntered.complete(Unit)
+              releaseSecond.await()
+            }
+          }
+          finishFirst.complete(Unit)
+          try {
+            first.join()
+            secondEntered.await()
+            // 新任务仍在运行
+            assertEquals(true, mutator.isBusyFlow.value)
+          } finally {
+            releaseSecond.complete(Unit)
+          }
+          second.join()
+        }
+        assertEquals(false, mutator.isBusyFlow.value)
+      }
+    }
+  }
+
+  // 收集者在状态流的赋值调用中内联执行；赋值在锁内的话，收集者卡住期间其他线程读取登记会被挡住
+  private suspend fun TestScope.checkBusyFlowUpdatedOutsideLock(useTryLoad: Boolean) {
+    Executors.newSingleThreadExecutor().asCoroutineDispatcher().use { taskDispatcher ->
+      Executors.newSingleThreadExecutor().asCoroutineDispatcher().use { queryDispatcher ->
+        val mutator = newMutator()
+        val collectorEntered = List(2) { CompletableDeferred<Unit>() }
+        val releaseCollector = List(2) { CountDownLatch(1) }
+        // 卡住变为 true 和恢复 false 这两次内联执行
+        val collector = launch(Dispatchers.Unconfined) {
+          mutator.isBusyFlow.drop(1).take(2).collectIndexed { index, _ ->
+            collectorEntered[index].complete(Unit)
+            check(releaseCollector[index].await(5, TimeUnit.SECONDS))
+          }
+        }
+        val task = async(taskDispatcher) {
+          if (useTryLoad) mutator.mutateOrThrow { 1 } else mutator.mutate { 1 }
+        }
+
+        try {
+          repeat(2) { index ->
+            collectorEntered[index].await()
+            val queryThread = CompletableDeferred<Thread>()
+            val queryReturned = AtomicBoolean()
+            val query = async(queryDispatcher) {
+              queryThread.complete(Thread.currentThread())
+              mutator.isBusy().also { queryReturned.set(true) }
+            }
+            assertEquals(false, awaitBlocked(queryThread.await()) { queryReturned.get() })
+            assertEquals(true, queryReturned.get())
+            assertEquals(index == 0, query.await())
+            releaseCollector[index].countDown()
+          }
+          assertEquals(1, task.await())
+          collector.join()
+          assertEquals(false, mutator.isBusyFlow.value)
+        } finally {
+          releaseCollector.forEach { it.countDown() }
+        }
+      }
+    }
+  }
+
   private fun newMutator() = FMutator(
     newCancelCause = { FLoader.ManualCancellationException() },
     newReplaceCause = { FLoader.ReplacedCancellationException() },
@@ -901,7 +1049,7 @@ class MutatorTest {
         callerPaused.await()
         assertEquals(true, probePaused.get())
         assertEquals(false, callbackEntered.get())
-        assertEquals(false, loader.loadingFlow.value)
+        assertEquals(true, loader.isBusyFlow.value)
 
         val next = async {
           if (replace) {
@@ -927,7 +1075,7 @@ class MutatorTest {
         assertEquals(2, next.await())
         assertEquals(false, callbackEntered.get())
         assertEquals(replace, replacementEntered.get())
-        assertEquals(false, loader.loadingFlow.value)
+        assertEquals(false, loader.isBusyFlow.value)
         assertEquals(3, loader.tryLoad { 3 }.getOrThrow())
       } finally {
         releaseCaller.countDown()
