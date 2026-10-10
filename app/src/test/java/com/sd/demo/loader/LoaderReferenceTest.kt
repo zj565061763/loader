@@ -77,6 +77,16 @@ class LoaderReferenceTest(private val useTryLoad: Boolean) {
   }
 
   @Test(timeout = 10_000)
+  fun `test replaced load releases callback capture while next load running`() {
+    checkReplacedLoadReleasesCaptureWhileNextLoadRunning(cleanup = false)
+  }
+
+  @Test(timeout = 10_000)
+  fun `test replaced load releases callback capture while next load running after previous cleanup`() {
+    checkReplacedLoadReleasesCaptureWhileNextLoadRunning(cleanup = true)
+  }
+
+  @Test(timeout = 10_000)
   fun `test failed load releases exception payload`() {
     assertReleased(FLoader()) {
       val cause = loadForTest<Any> { throw PayloadException(Any()) }.exceptionOrNull() as PayloadException
@@ -340,6 +350,50 @@ class LoaderReferenceTest(private val useTryLoad: Boolean) {
         first.join()
         capture
       }
+    }
+  }
+
+  // 旧加载被替换并结束后，替换它的新加载仍在运行，不能继续持有旧加载的回调闭包
+  private fun checkReplacedLoadReleasesCaptureWhileNextLoadRunning(cleanup: Boolean) {
+    val loader = FLoader()
+    val scopeJob = SupervisorJob()
+    // 独立根 scope 让新加载在 runTest 退出后的 GC 检查期间继续运行
+    val scope = CoroutineScope(scopeJob + Dispatchers.Unconfined)
+    val releaseCleanup = CompletableDeferred<Unit>()
+    val releaseNext = CompletableDeferred<Unit>()
+
+    try {
+      assertReleased(loader) {
+        val capture = Any()
+        val first = scope.launch(start = CoroutineStart.UNDISPATCHED) {
+          runCatching {
+            loadForTest {
+              capture.hashCode()
+              try {
+                awaitCancellation()
+              } finally {
+                if (cleanup) withContext(NonCancellable) { releaseCleanup.await() }
+              }
+            }
+          }
+        }
+        val next = scope.launch(start = CoroutineStart.UNDISPATCHED) {
+          load { releaseNext.await() }
+        }
+        // 旧加载清理挂起时新加载先等待它结束，否则旧加载在新加载的取消调用内联结束
+        assertEquals(!cleanup, first.isCompleted)
+
+        releaseCleanup.complete(Unit)
+        first.join()
+        assertEquals(false, next.isCompleted)
+        assertEquals(true, isLoading())
+        capture
+      }
+      assertEquals(true, loader.isLoading())
+    } finally {
+      releaseCleanup.complete(Unit)
+      releaseNext.complete(Unit)
+      runTest { scopeJob.cancelAndJoin() }
     }
   }
 

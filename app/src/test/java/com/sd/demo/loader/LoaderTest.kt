@@ -19,6 +19,7 @@ import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.isActive
@@ -1705,6 +1706,111 @@ class LoaderTest {
     }
   }
 
+  @Test(timeout = 60_000)
+  fun `test concurrent calls with loads awaiting cancellation on multiple threads`() = runTest {
+    withContext(Dispatchers.Default) {
+      // 登记去掉加锁后出错的窗口很窄，机器满载时轮数少了撞不上
+      repeat(3000) { round ->
+        val loader = FLoader()
+        val start = CompletableDeferred<Unit>()
+        val running = AtomicInteger()
+        val entered = AtomicInteger()
+        val exited = AtomicInteger()
+        val overlapped = AtomicBoolean()
+        val cancelReturnedEarly = AtomicBoolean()
+        val causes = ConcurrentLinkedQueue<CancellationException>()
+
+        // 回调都能自行结束时任务登记出错表现不出来，这里让多数回调只在被取消时结束
+        fun newOnLoad(finite: Boolean): suspend () -> Unit = {
+          if (running.incrementAndGet() != 1) overlapped.set(true)
+          val index = entered.incrementAndGet()
+          try {
+            when (Random.nextInt(if (finite) 2 else 4)) {
+              0 -> Unit
+              1 -> yield()
+              else -> delay(Long.MAX_VALUE)
+            }
+          } finally {
+            if (Random.nextInt(3) == 0) withContext(NonCancellable) { yield() }
+            // 回调串行执行，退出序号只增不减
+            exited.set(index)
+            running.decrementAndGet()
+          }
+        }
+        val onLoad = newOnLoad(finite = false)
+        // NonCancellable 中的调用方超时取消不掉，回调必须能自行结束
+        val finiteOnLoad = newOnLoad(finite = true)
+
+        val finished = withTimeoutOrNull(10_000) {
+          coroutineScope {
+            val callerJobs = List(8) { index ->
+              // Unconfined 上的调用方被取消时，清理在取消方线程内联执行
+              launch(if (index % 2 == 0) Dispatchers.Default else Dispatchers.Unconfined) {
+                start.await()
+                repeat(3) {
+                  try {
+                    when (Random.nextInt(6)) {
+                      0, 1 -> loader.load(onLoad)
+                      2 -> loader.tryLoad(onLoad)
+                      3 -> withContext(NonCancellable) { loader.load(finiteOnLoad) }
+                      else -> {
+                        val enteredBefore = entered.get()
+                        loader.cancelAndJoin()
+                        // 调用前已进入的回调必须都已退出
+                        if (exited.get() < enteredBefore) cancelReturnedEarly.set(true)
+                      }
+                    }
+                  } catch (e: CancellationException) {
+                    causes.add(e)
+                  }
+                }
+              }
+            }
+            // 排队、替换和 cancelAndJoin 并发期间随机取消调用方
+            launch {
+              start.await()
+              repeat(2) {
+                yield()
+                callerJobs[Random.nextInt(callerJobs.size)].cancel(CustomCancellationException(round))
+              }
+            }
+            // 反复替换停在回调里的加载，直到所有调用方结束
+            launch {
+              start.await()
+              while (callerJobs.any { !it.isCompleted }) {
+                try {
+                  loader.load { }
+                } catch (e: CancellationException) {
+                  // 收尾的 load 自己也会被替换或取消，不捕获的话收尾协程会静默结束
+                  causes.add(e)
+                }
+                yield()
+              }
+            }
+            start.complete(Unit)
+          }
+          true
+        }
+
+        // 登记出错时停在回调里的加载可能没人取消，调用方无法结束
+        assertEquals(true, finished)
+        assertEquals(false, cancelReturnedEarly.get())
+        assertEquals(false, overlapped.get())
+        assertEquals(0, running.get())
+        assertEquals(entered.get(), exited.get())
+        assertEquals(false, loader.isLoading())
+        assertEquals(1, loader.tryLoad { 1 }.getOrThrow())
+        causes.forEach { cause ->
+          val expected = cause is FLoader.ManualCancellationException ||
+            cause is FLoader.ReplacedCancellationException ||
+            cause is FLoader.BusyCancellationException ||
+            cause is CustomCancellationException
+          assertTrue("unexpected cause: $cause", expected)
+        }
+      }
+    }
+  }
+
   @Test(timeout = 10_000)
   fun `test concurrent tryLoad accepts only one caller`() = runTest {
     withContext(Dispatchers.Default) {
@@ -2453,6 +2559,8 @@ class LoaderTest {
               loader.load {
                 try {
                   releaseLoad.await()
+                  // 调用方已取消的 cancelAndJoin 不等待就返回，releaseLoad 可能先于 await 完成，此时 await 不挂起也不检查取消
+                  currentCoroutineContext().ensureActive()
                   loaded.set(true)
                 } catch (e: CancellationException) {
                   callbackCause.set(e)
