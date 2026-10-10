@@ -97,7 +97,9 @@ private class LoaderImpl : FLoader {
     newReplaceCause = { FLoader.ReplacedCancellationException() },
     newBusyCause = { FLoader.BusyCancellationException() },
   )
-  override val isBusyFlow: StateFlow<Boolean> = _mutator.isBusyFlow
+
+  override val isBusyFlow: StateFlow<Boolean>
+    get() = _mutator.isBusyFlow
 
   override fun isBusy(): Boolean {
     return _mutator.isBusy()
