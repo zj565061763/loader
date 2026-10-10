@@ -643,6 +643,224 @@ class MutatorTest {
     }
   }
 
+  @Test
+  fun `test isBusy follows task lifecycle`() = runTest {
+    val mutator = newMutator()
+    val releaseCleanup = CompletableDeferred<Unit>()
+    var busyInBlock: Boolean? = null
+    assertEquals(false, mutator.isBusy())
+
+    val task = async {
+      runCatching {
+        mutator.mutate {
+          busyInBlock = mutator.isBusy()
+          try {
+            awaitCancellation()
+          } finally {
+            withContext(NonCancellable) { releaseCleanup.await() }
+          }
+        }
+      }.exceptionOrNull()
+    }.also { runCurrent() }
+
+    try {
+      assertEquals(true, busyInBlock)
+      assertEquals(true, mutator.isBusy())
+
+      // 任务已被取消但仍在清理，仍算忙
+      val cancelJob = launch { mutator.cancelAndJoin() }.also { runCurrent() }
+      assertEquals(false, task.isCompleted)
+      assertEquals(true, mutator.isBusy())
+
+      releaseCleanup.complete(Unit)
+      cancelJob.join()
+      assertTrue(task.await() is FLoader.ManualCancellationException)
+      assertEquals(false, mutator.isBusy())
+
+      assertEquals(true, mutator.mutateOrThrow { mutator.isBusy() })
+      assertEquals(false, mutator.isBusy())
+    } finally {
+      releaseCleanup.complete(Unit)
+    }
+  }
+
+  @Test(timeout = 10_000)
+  fun `test isBusy when queued task not resumed after previous finished`() = runTest {
+    val mutator = newMutator()
+    val queuedScheduler = TestCoroutineScheduler()
+    val queuedDispatcher = StandardTestDispatcher(queuedScheduler)
+    val first = async {
+      runCatching { mutator.mutate { awaitCancellation() } }.exceptionOrNull()
+    }.also { runCurrent() }
+
+    // 使用独立调度器，让排队任务在旧任务结束后停在恢复前
+    val queued = async(queuedDispatcher + queuedScheduler) { mutator.mutate { 2 } }
+    try {
+      queuedScheduler.runCurrent()
+      runCurrent()
+      assertTrue(first.await() is FLoader.ReplacedCancellationException)
+      assertEquals(false, queued.isCompleted)
+
+      // 没有运行任务，但排队任务尚未结束，仍算忙
+      assertEquals(true, mutator.isBusy())
+
+      queuedScheduler.runCurrent()
+      assertEquals(2, queued.await())
+      assertEquals(false, mutator.isBusy())
+    } finally {
+      queuedScheduler.runCurrent()
+      runCurrent()
+    }
+  }
+
+  @Test
+  fun `test isBusy when queued task cancelled during previous cleanup`() = runTest {
+    val mutator = newMutator()
+    val releaseCleanup = CompletableDeferred<Unit>()
+    val first = async {
+      runCatching {
+        mutator.mutate {
+          try {
+            awaitCancellation()
+          } finally {
+            withContext(NonCancellable) { releaseCleanup.await() }
+          }
+        }
+      }.exceptionOrNull()
+    }.also { runCurrent() }
+
+    try {
+      val queued = launch { mutator.mutate { } }.also { runCurrent() }
+      queued.cancelAndJoin()
+      assertEquals(false, first.isCompleted)
+
+      // 排队任务已结束，旧任务仍在清理，仍算忙
+      assertEquals(true, mutator.isBusy())
+
+      releaseCleanup.complete(Unit)
+      assertTrue(first.await() is FLoader.ReplacedCancellationException)
+      assertEquals(false, mutator.isBusy())
+    } finally {
+      releaseCleanup.complete(Unit)
+    }
+  }
+
+  @Test(timeout = 10_000)
+  fun `test isBusy is false after task completed before registration cleared`() = runTest {
+    Executors.newSingleThreadExecutor().asCoroutineDispatcher().use { taskDispatcher ->
+      Executors.newSingleThreadExecutor().asCoroutineDispatcher().use { lockDispatcher ->
+        val lockHeld = CompletableDeferred<Unit>()
+        val releaseLock = CountDownLatch(1)
+        val taskThread = CompletableDeferred<Thread>()
+        val finishTask = CompletableDeferred<Unit>()
+        val busyBeforeCleared = AtomicBoolean(true)
+        lateinit var mutator: FMutator
+        mutator = FMutator(
+          newCancelCause = { FLoader.ManualCancellationException() },
+          newReplaceCause = { FLoader.ReplacedCancellationException() },
+          newBusyCause = {
+            // 忙异常在锁内创建，借它从外部持有锁
+            lockHeld.complete(Unit)
+            check(releaseLock.await(5, TimeUnit.SECONDS))
+            // 任务已完成而清空还被锁挡着，登记仍指向它；锁可重入，在持锁线程上读到的就是这个窗口
+            busyBeforeCleared.set(mutator.isBusy())
+            FLoader.BusyCancellationException()
+          },
+        )
+
+        val task = async(taskDispatcher) {
+          mutator.mutate {
+            taskThread.complete(Thread.currentThread())
+            finishTask.await()
+            1
+          }
+        }
+        try {
+          val thread = taskThread.await()
+          val busy = async(lockDispatcher) {
+            runCatching { mutator.mutateOrThrow { 2 } }.exceptionOrNull()
+          }
+          lockHeld.await()
+
+          // 持锁期间让任务结束，它的清空被锁挡住
+          finishTask.complete(Unit)
+          assertEquals(true, awaitBlocked(thread) { task.isCompleted })
+
+          // 判忙看任务是否完成，不看字段是否为 null
+          releaseLock.countDown()
+          assertTrue(busy.await() is FLoader.BusyCancellationException)
+          assertEquals(false, busyBeforeCleared.get())
+          assertEquals(1, task.await())
+          assertEquals(false, mutator.isBusy())
+        } finally {
+          finishTask.complete(Unit)
+          releaseLock.countDown()
+        }
+      }
+    }
+  }
+
+  @Test(timeout = 10_000)
+  fun `test isBusy reads registration inside lock`() = runTest {
+    Executors.newSingleThreadExecutor().asCoroutineDispatcher().use { queryDispatcher ->
+      Executors.newSingleThreadExecutor().asCoroutineDispatcher().use { lockDispatcher ->
+        val lockHeld = CompletableDeferred<Unit>()
+        val releaseLock = CountDownLatch(1)
+        val queryThread = CompletableDeferred<Thread>()
+        val startQuery = CompletableDeferred<Unit>()
+        val queryReturned = AtomicBoolean()
+        val mutator = FMutator(
+          newCancelCause = { FLoader.ManualCancellationException() },
+          newReplaceCause = { FLoader.ReplacedCancellationException() },
+          newBusyCause = {
+            // 忙异常在锁内创建，借它从外部持有锁
+            lockHeld.complete(Unit)
+            check(releaseLock.await(5, TimeUnit.SECONDS))
+            FLoader.BusyCancellationException()
+          },
+        )
+
+        val first = async {
+          runCatching { mutator.mutate { awaitCancellation() } }.exceptionOrNull()
+        }.also { runCurrent() }
+        val query = async(queryDispatcher) {
+          queryThread.complete(Thread.currentThread())
+          startQuery.await()
+          mutator.isBusy().also { queryReturned.set(true) }
+        }
+        try {
+          val thread = queryThread.await()
+          val busy = async(lockDispatcher) {
+            runCatching { mutator.mutateOrThrow { 2 } }.exceptionOrNull()
+          }
+          lockHeld.await()
+
+          // 持锁期间调用 isBusy，它必须在读取登记时被锁挡住
+          startQuery.complete(Unit)
+          assertEquals(true, awaitBlocked(thread) { queryReturned.get() })
+          assertEquals(false, queryReturned.get())
+
+          releaseLock.countDown()
+          assertTrue(busy.await() is FLoader.BusyCancellationException)
+          assertEquals(true, query.await())
+
+          mutator.cancelAndJoin()
+          assertTrue(first.await() is FLoader.ManualCancellationException)
+          assertEquals(false, mutator.isBusy())
+        } finally {
+          startQuery.complete(Unit)
+          releaseLock.countDown()
+        }
+      }
+    }
+  }
+
+  private fun newMutator() = FMutator(
+    newCancelCause = { FLoader.ManualCancellationException() },
+    newReplaceCause = { FLoader.ReplacedCancellationException() },
+    newBusyCause = { FLoader.BusyCancellationException() },
+  )
+
   // 等目标线程被锁挡住；目标操作越过了锁或超时则返回 false
   private fun awaitBlocked(thread: Thread, passed: () -> Boolean): Boolean {
     val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5)

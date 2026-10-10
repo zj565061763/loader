@@ -61,7 +61,7 @@ internal class FMutator(
 
       synchronized(_lock) {
         // 等待中或清理中的任务都算忙，不取消也不等待
-        if (_job?.isCompleted == false || _runningJob?.isCompleted == false) throw newBusyCause()
+        if (isBusy()) throw newBusyCause()
         _job = mutateJob
         _runningJob = mutateJob
       }
@@ -82,6 +82,13 @@ internal class FMutator(
     // 逐个等待，等 runningJob 时不能再引用 job，否则它结束后仍被持有
     job?.join()
     runningJob?.join()
+  }
+
+  /** 是否有尚未结束的任务，等待中或清理中的也算 */
+  fun isBusy(): Boolean {
+    return synchronized(_lock) {
+      _job?.isCompleted == false || _runningJob?.isCompleted == false
+    }
   }
 
   private fun Job.clearOnCompletion() {
