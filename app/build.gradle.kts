@@ -69,6 +69,11 @@ dependencies {
   implementation(project(":lib"))
 }
 
+tasks.withType<Test>().configureEach {
+  // runTest 默认超时 60 秒，调小后卡住的用例能尽快失败
+  systemProperty("kotlinx.coroutines.test.default_timeout", "10s")
+}
+
 tasks.withType<KotlinCompile>().configureEach {
   if (name.endsWith("UnitTestKotlin")) {
     val libBuildDirectory = project(":lib").layout.buildDirectory

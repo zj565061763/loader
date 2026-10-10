@@ -47,6 +47,7 @@ import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicReference
 import kotlin.coroutines.cancellation.CancellationException
 import kotlin.random.Random
+import kotlin.time.Duration.Companion.seconds
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class LoaderTest {
@@ -1582,7 +1583,7 @@ class LoaderTest {
   }
 
   @Test(timeout = 20_000)
-  fun `test concurrent load and tryLoad with error in block on multiple threads`() = runTest {
+  fun `test concurrent load and tryLoad with error in block on multiple threads`() = runTest(timeout = 20.seconds) {
     withContext(Dispatchers.Default) {
       repeat(100) {
         val loader = FLoader()
@@ -1641,7 +1642,7 @@ class LoaderTest {
   }
 
   @Test(timeout = 60_000)
-  fun `test concurrent load with random caller cancellation on multiple threads`() = runTest {
+  fun `test concurrent load with random caller cancellation on multiple threads`() = runTest(timeout = 60.seconds) {
     withContext(Dispatchers.Default) {
       repeat(200) { round ->
         val loader = FLoader()
@@ -1707,7 +1708,7 @@ class LoaderTest {
   }
 
   @Test(timeout = 60_000)
-  fun `test concurrent calls with loads awaiting cancellation on multiple threads`() = runTest {
+  fun `test concurrent calls with loads awaiting cancellation on multiple threads`() = runTest(timeout = 60.seconds) {
     withContext(Dispatchers.Default) {
       // 登记去掉加锁后出错的窗口很窄，机器满载时轮数少了撞不上
       repeat(3000) { round ->
@@ -2168,22 +2169,22 @@ class LoaderTest {
     assertEquals(2, otherLoader.tryLoad { 2 }.getOrThrow())
   }
 
-  @Test
+  @Test(timeout = 10_000)
   fun `test load in NonCancellable cancelled by cancelAndJoin`() = runTest {
     checkLoadInNonCancellableCancelled(useTryLoad = false, replace = false)
   }
 
-  @Test
+  @Test(timeout = 10_000)
   fun `test load in NonCancellable cancelled by new load`() = runTest {
     checkLoadInNonCancellableCancelled(useTryLoad = false, replace = true)
   }
 
-  @Test
+  @Test(timeout = 10_000)
   fun `test tryLoad in NonCancellable cancelled by cancelAndJoin`() = runTest {
     checkLoadInNonCancellableCancelled(useTryLoad = true, replace = false)
   }
 
-  @Test
+  @Test(timeout = 10_000)
   fun `test tryLoad in NonCancellable cancelled by new load`() = runTest {
     checkLoadInNonCancellableCancelled(useTryLoad = true, replace = true)
   }
@@ -3611,7 +3612,8 @@ class LoaderTest {
     }
   }
 
-  // load 与 tryLoad 的登记路径不同，需分别验证 NonCancellable 内仍会被取消
+  // load 与 tryLoad 的登记路径不同，需分别验证 NonCancellable 内仍会被取消。
+  // 回归时调用方不会结束，runTest 的超时也结束不了它，调用处用超时让测试失败而不是卡住。
   private suspend fun TestScope.checkLoadInNonCancellableCancelled(useTryLoad: Boolean, replace: Boolean) {
     val loader = FLoader()
     val container = mutableListOf<String>()

@@ -111,6 +111,7 @@
 - `:app` 单元测试通过 `friendPaths` 访问同一构建变体的 `:lib` 内部成员
 - `MutatorTest` 显式抑制 `INVISIBLE_REFERENCE` 和 `INVISIBLE_MEMBER`，兼容 IDE 未识别跨模块友元关系的分析
 - 测试使用 `kotlinx-coroutines-test` 的 `runTest`、`runCurrent`、`advanceUntilIdle`，Flow 断言使用 Turbine
+- `runTest` 的默认超时在 `app/build.gradle.kts` 中设为 10 秒，卡住的用例能尽快失败；需要更久的用例给 `runTest` 显式传 `timeout`
 - 测试方法名使用反引号包裹的英文句子，例如 ``fun `test load when loading`() = runTest { ... }``
 - 跨协程边界验证异常原始实例时使用带业务字段的异常，避免调试模式的堆栈恢复复制异常
 - 验证并发执行顺序时，通常向字符串或列表形式的 `container` 追加标记
@@ -126,6 +127,7 @@
 - 验证任务登记的压力用例让多数回调只在被取消时结束，并用收尾协程反复 `load` 替换，直到所有调用方结束：运行中的任务没人取消时调用方无法结束，靠超时失败
 - 收尾协程的 `load` 自己也会被替换或取消，必须捕获取消异常后继续，否则收尾协程静默结束，用例卡住
 - 压力用例里 `NonCancellable` 中的调用方超时取消不掉，它的回调必须能自行结束
+- 调用方在 `NonCancellable` 中且回调不会自行结束的用例必须带 `@Test(timeout)`：回归时调用方不会结束，`runTest` 的超时也结束不了它，全量测试会一直卡住
 - 压力用例里 `cancelAndJoin` 正常返回后，校验调用前已进入的回调都已退出
 - 验证取消期间内联发起的加载不受影响时，让它保持挂起到取消方返回之后；同步完成的加载发现不了误取消和多余的等待
 - 断言被取消的加载没有执行完回调时，回调里等到放行信号后要再检查 `ensureActive`：取消方不等待就返回时，信号可能先于 `await` 完成，此时 `await` 不挂起也不检查取消
