@@ -9,12 +9,13 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
+/** 串行执行任务，新任务可以取消并等待旧任务，也可以在繁忙时被拒绝 */
 internal class FMutator(
-  /** 创建[cancelAndJoin]取消任务的异常 */
+  /** [cancelAndJoin]取消任务时使用的取消原因 */
   private val newCancelCause: () -> CancellationException,
-  /** 创建替换任务时取消旧任务的异常 */
+  /** 新任务替换旧任务时使用的取消原因 */
   private val newReplaceCause: () -> CancellationException,
-  /** 创建[mutateOrThrow]繁忙时抛出的异常 */
+  /** [mutateOrThrow]繁忙时抛出的异常 */
   private val newBusyCause: () -> CancellationException,
 ) {
   /** 保护[_job]和[_runningJob]，锁内不能挂起 */
@@ -34,6 +35,7 @@ internal class FMutator(
   /** [isBusy]的状态流，快速变化的中间值可能被合并 */
   val isBusyFlow: StateFlow<Boolean> = _isBusyFlow.asStateFlow()
 
+  /** 取消上一个任务并等待它结束，再执行[block] */
   suspend fun <T> mutate(block: suspend () -> T): T {
     _mutateMutex.checkNested()
     return coroutineScope {
@@ -50,17 +52,19 @@ internal class FMutator(
       // 等待期间不能再引用 prevJob，否则它结束后仍被持有
       runningJob?.join()
 
-      // 等待期间有更新的任务进入时放弃执行
+      // 仍是最新任务才登记为运行任务，否则已被更新的任务顶替，取消自己
       synchronized(_lock) {
         (_job !== mutateJob).also { if (!it) _runningJob = mutateJob }
       }.also { replaced ->
         if (replaced) mutateJob.cancel(newReplaceCause())
       }
 
+      // 被顶替时 doMutate 会检查到取消，不执行 block
       doMutate(block)
     }
   }
 
+  /** 不繁忙时执行[block]，繁忙时抛出异常，不取消也不等待已有任务 */
   suspend fun <T> mutateOrThrow(block: suspend () -> T): T {
     _mutateMutex.checkNested()
     return coroutineScope {
@@ -68,8 +72,8 @@ internal class FMutator(
       mutateJob.clearOnCompletion()
       mutateJob.ensureActive()
 
+      // 判忙和登记必须在同一次加锁中完成
       synchronized(_lock) {
-        // 等待中或清理中的任务都算忙，不取消也不等待
         if (isBusy()) throw newBusyCause()
         _job = mutateJob
         _runningJob = mutateJob
@@ -80,6 +84,7 @@ internal class FMutator(
     }
   }
 
+  /** 取消调用时已进入的任务，并等待它们结束 */
   suspend fun cancelAndJoin() {
     _mutateMutex.checkNested()
 
@@ -111,7 +116,7 @@ internal class FMutator(
     }
   }
 
-  /** 把[isBusy]同步到[isBusyFlow]，在锁外赋值，收集者可能在赋值调用中内联执行 */
+  /** 把[isBusy]同步到[isBusyFlow]，必须在锁外调用，因为收集者可能在赋值时内联执行 */
   private fun syncBusyFlow() {
     do {
       val busy = isBusy()
@@ -122,6 +127,7 @@ internal class FMutator(
 
   private suspend fun <T> doMutate(block: suspend () -> T): T {
     return _mutateMutex.withLock {
+      // 进入锁时切换上下文期间可能被取消，执行 block 前再检查
       currentCoroutineContext().ensureActive()
       block()
     }
