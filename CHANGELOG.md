@@ -27,6 +27,7 @@
 - **补充多次取消时的异常说明**：加载被多次取消时只保留最先的取消原因，先被新的 `load` 替换再被 `cancelAndJoin()` 取消时抛出的仍是 `ReplacedCancellationException`。
 - **补充子协程内忙异常的说明**：在 `onLoad` 内启动的子协程中调用其他 Loader 的 `tryLoad`，忙异常按子协程取消处理，不会传播到当前加载。
 - **补充嵌套检测误判的场景**：在 `onLoad` 内启动继承了上下文但换成独立 `Job` 的协程（如 `CoroutineScope(currentCoroutineContext() + Job()).launch`），即使加载已结束，它调用同一 Loader 的 `load` / `tryLoad` / `cancelAndJoin` 仍会被判为嵌套，直接抛出 `IllegalStateException`，`FMutex.withLock` 同理。
+- **移除 `withTimeout` 超时说明**：`withTimeout` 超时抛出的是 `CancellationException`，已包含在“`CancellationException` 会原样抛出”的说明中。此前建议改用的 `withTimeoutOrNull` 超时返回 `null`，`load` 得到的是成功结果；需要 `Result.failure` 时请把超时转换为普通异常。
 
 ### Migration
 
