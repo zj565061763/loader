@@ -2566,6 +2566,9 @@ class LoaderTest {
       assertEquals(false, queuedJob.isCompleted)
       assertEquals(listOf("old-cleaned", "new-load"), container)
       assertEquals(startTime + 1000, currentTime)
+      // 被替换的排队任务尚未退出，但不算忙
+      assertEquals(false, loader.isBusy())
+      assertEquals(false, loader.isBusyFlow.value)
       assertEquals(3, loader.tryLoad { 3 }.getOrThrow())
 
       queuedScheduler.runCurrent()
@@ -3278,86 +3281,60 @@ class LoaderTest {
 
   @Test(timeout = 10_000)
   fun `test cancelAndJoin from Unconfined collector when busy starts`() = runTest {
+    checkCancelAndJoinFromCollectorWhenBusyStarts(useTryLoad = false)
+  }
+
+  @Test(timeout = 10_000)
+  fun `test cancelAndJoin from Unconfined collector when busy starts by tryLoad`() = runTest {
+    checkCancelAndJoinFromCollectorWhenBusyStarts(useTryLoad = true)
+  }
+
+  @Test(timeout = 10_000)
+  fun `test load from Unconfined collector when busy starts`() = runTest {
+    checkLoadFromCollectorWhenBusyStarts(useTryLoad = false)
+  }
+
+  @Test(timeout = 10_000)
+  fun `test load from Unconfined collector when busy starts by tryLoad`() = runTest {
+    checkLoadFromCollectorWhenBusyStarts(useTryLoad = true)
+  }
+
+  @Test(timeout = 10_000)
+  fun `test tryLoad from Unconfined collector when busy starts`() = runTest {
+    checkTryLoadFromCollectorWhenBusyStarts(useTryLoad = false)
+  }
+
+  @Test(timeout = 10_000)
+  fun `test tryLoad from Unconfined collector when busy starts by tryLoad`() = runTest {
+    checkTryLoadFromCollectorWhenBusyStarts(useTryLoad = true)
+  }
+
+  @Test(timeout = 10_000)
+  fun `test Unconfined collector runs after onLoad suspended when caller also on Unconfined`() = runTest {
     val loader = FLoader()
     val container = mutableListOf<String>()
     val collectorJob = launch(Dispatchers.Unconfined) {
       loader.isBusyFlow.first { it }
-      // 收集者在 isBusyFlow 变为 true 的同步调用内联执行，此时加载已登记但尚未进入 onLoad
       container.add("collector-cancel")
       loader.cancelAndJoin()
       container.add("collector-cancel-finished")
     }
 
-    val exception = runCatching {
-      loader.load {
-        container.add("load-entered")
-        delay(Long.MAX_VALUE)
-      }
-    }.exceptionOrNull()
+    val callerJob = async(Dispatchers.Unconfined) {
+      runCatching {
+        loader.load {
+          container.add("load-entered")
+          delay(Long.MAX_VALUE)
+        }
+      }.exceptionOrNull()
+    }
 
-    // 取消早于 onLoad，onLoad 不会执行
-    assertTrue(exception is FLoader.ManualCancellationException)
+    // 调用方也在 Unconfined 上时收集者不内联执行，要等调用方挂起才运行，此时已进入 onLoad
+    assertTrue(callerJob.await() is FLoader.ManualCancellationException)
     assertEquals(true, collectorJob.isCompleted)
-    assertEquals(listOf("collector-cancel", "collector-cancel-finished"), container)
+    assertEquals(listOf("load-entered", "collector-cancel", "collector-cancel-finished"), container)
     assertEquals(false, loader.isBusyFlow.value)
     assertEquals(1, loader.tryLoad { 1 }.getOrThrow())
-  }
-
-  @Test(timeout = 10_000)
-  fun `test load from Unconfined collector when busy starts`() = runTest {
-    val loader = FLoader()
-    val container = mutableListOf<String>()
-    var collectorResult: Result<Int>? = null
-    val collectorJob = launch(Dispatchers.Unconfined) {
-      loader.isBusyFlow.first { it }
-      // 收集者在 isBusyFlow 变为 true 的同步调用内联执行，这里发起的 load 会替换尚未进入 onLoad 的加载
-      container.add("collector-load")
-      collectorResult = loader.load {
-        container.add("collector-load-entered")
-        2
-      }
-    }
-
-    val exception = runCatching {
-      loader.load {
-        container.add("load-entered")
-        delay(Long.MAX_VALUE)
-      }
-    }.exceptionOrNull()
-
-    // 替换早于 onLoad，onLoad 不会执行
-    assertTrue(exception is FLoader.ReplacedCancellationException)
-    assertEquals(true, collectorJob.isCompleted)
-    assertEquals(2, collectorResult?.getOrThrow())
-    assertEquals(listOf("collector-load", "collector-load-entered"), container)
-    assertEquals(false, loader.isBusyFlow.value)
-    assertEquals(1, loader.tryLoad { 1 }.getOrThrow())
-  }
-
-  @Test(timeout = 10_000)
-  fun `test tryLoad from Unconfined collector when busy starts`() = runTest {
-    val loader = FLoader()
-    val container = mutableListOf<String>()
-    var tryLoadCause: Throwable? = null
-    val collectorJob = launch(Dispatchers.Unconfined) {
-      loader.isBusyFlow.first { it }
-      // 收集者在 isBusyFlow 变为 true 的同步调用内联执行，此时加载已登记但尚未进入 onLoad，tryLoad 必须立即判忙
-      container.add("collector-tryLoad")
-      tryLoadCause = runCatching { loader.tryLoad { container.add("collector-tryLoad-entered") } }.exceptionOrNull()
-    }
-
-    val result = loader.load {
-      container.add("load-entered")
-      1
-    }
-
-    // 判忙不影响即将进入 onLoad 的加载
-    assertEquals(1, result.getOrThrow())
-    assertEquals(true, collectorJob.isCompleted)
-    assertTrue(tryLoadCause is FLoader.BusyCancellationException)
-    assertEquals(listOf("collector-tryLoad", "load-entered"), container)
-    assertEquals(false, loader.isBusyFlow.value)
-    assertEquals(2, loader.tryLoad { 2 }.getOrThrow())
   }
 
   @Test(timeout = 10_000)
@@ -3698,5 +3675,92 @@ class LoaderTest {
     assertEquals(if (replace) listOf("cleaned", "new-load") else listOf("cleaned"), container)
     assertEquals(false, loader.isBusyFlow.value)
     assertEquals(3, loader.tryLoad { 3 }.getOrThrow())
+  }
+
+  // load 与 tryLoad 的登记路径不同，需分别验证收集者在 isBusyFlow 变为 true 时内联取消
+  private suspend fun TestScope.checkCancelAndJoinFromCollectorWhenBusyStarts(useTryLoad: Boolean) {
+    val loader = FLoader()
+    val container = mutableListOf<String>()
+    val onLoad: suspend () -> Unit = {
+      container.add("load-entered")
+      delay(Long.MAX_VALUE)
+    }
+    val collectorJob = launch(Dispatchers.Unconfined) {
+      loader.isBusyFlow.first { it }
+      // 收集者在 isBusyFlow 变为 true 的同步调用内联执行，此时加载已登记但尚未进入 onLoad
+      container.add("collector-cancel")
+      loader.cancelAndJoin()
+      container.add("collector-cancel-finished")
+    }
+
+    val exception = runCatching {
+      if (useTryLoad) loader.tryLoad(onLoad) else loader.load(onLoad)
+    }.exceptionOrNull()
+
+    // 取消早于 onLoad，onLoad 不会执行
+    assertTrue(exception is FLoader.ManualCancellationException)
+    assertEquals(true, collectorJob.isCompleted)
+    assertEquals(listOf("collector-cancel", "collector-cancel-finished"), container)
+    assertEquals(false, loader.isBusyFlow.value)
+    assertEquals(1, loader.tryLoad { 1 }.getOrThrow())
+  }
+
+  // load 与 tryLoad 的登记路径不同，需分别验证收集者在 isBusyFlow 变为 true 时内联替换
+  private suspend fun TestScope.checkLoadFromCollectorWhenBusyStarts(useTryLoad: Boolean) {
+    val loader = FLoader()
+    val container = mutableListOf<String>()
+    var collectorResult: Result<Int>? = null
+    val onLoad: suspend () -> Unit = {
+      container.add("load-entered")
+      delay(Long.MAX_VALUE)
+    }
+    val collectorJob = launch(Dispatchers.Unconfined) {
+      loader.isBusyFlow.first { it }
+      // 收集者在 isBusyFlow 变为 true 的同步调用内联执行，这里发起的 load 会替换尚未进入 onLoad 的加载
+      container.add("collector-load")
+      collectorResult = loader.load {
+        container.add("collector-load-entered")
+        2
+      }
+    }
+
+    val exception = runCatching {
+      if (useTryLoad) loader.tryLoad(onLoad) else loader.load(onLoad)
+    }.exceptionOrNull()
+
+    // 替换早于 onLoad，onLoad 不会执行
+    assertTrue(exception is FLoader.ReplacedCancellationException)
+    assertEquals(true, collectorJob.isCompleted)
+    assertEquals(2, collectorResult?.getOrThrow())
+    assertEquals(listOf("collector-load", "collector-load-entered"), container)
+    assertEquals(false, loader.isBusyFlow.value)
+    assertEquals(1, loader.tryLoad { 1 }.getOrThrow())
+  }
+
+  // load 与 tryLoad 的登记路径不同，需分别验证收集者在 isBusyFlow 变为 true 时内联调用的 tryLoad 判忙
+  private suspend fun TestScope.checkTryLoadFromCollectorWhenBusyStarts(useTryLoad: Boolean) {
+    val loader = FLoader()
+    val container = mutableListOf<String>()
+    var tryLoadCause: Throwable? = null
+    val onLoad: suspend () -> Int = {
+      container.add("load-entered")
+      1
+    }
+    val collectorJob = launch(Dispatchers.Unconfined) {
+      loader.isBusyFlow.first { it }
+      // 收集者在 isBusyFlow 变为 true 的同步调用内联执行，此时加载已登记但尚未进入 onLoad，tryLoad 必须立即判忙
+      container.add("collector-tryLoad")
+      tryLoadCause = runCatching { loader.tryLoad { container.add("collector-tryLoad-entered") } }.exceptionOrNull()
+    }
+
+    val result = if (useTryLoad) loader.tryLoad(onLoad) else loader.load(onLoad)
+
+    // 判忙不影响即将进入 onLoad 的加载
+    assertEquals(1, result.getOrThrow())
+    assertEquals(true, collectorJob.isCompleted)
+    assertTrue(tryLoadCause is FLoader.BusyCancellationException)
+    assertEquals(listOf("collector-tryLoad", "load-entered"), container)
+    assertEquals(false, loader.isBusyFlow.value)
+    assertEquals(2, loader.tryLoad { 2 }.getOrThrow())
   }
 }
