@@ -171,6 +171,70 @@ class LoaderReferenceTest(private val useTryLoad: Boolean) {
     checkCancelledQueuedLoadReleasesReferenceDuringCleanup(captureCallback = false)
   }
 
+  @Test(timeout = 10_000)
+  fun `test replaced queued load releases callback capture during previous cleanup`() {
+    checkEndedQueuedLoadReleasesCaptureDuringCleanup { loader, queued ->
+      val latest = launch(start = CoroutineStart.UNDISPATCHED) {
+        runCatching { loader.load { } }
+      }
+      queued.join()
+      assertEquals(false, latest.isCompleted)
+    }
+  }
+
+  @Test(timeout = 10_000)
+  fun `test manually cancelled queued load releases callback capture during previous cleanup`() {
+    checkEndedQueuedLoadReleasesCaptureDuringCleanup { loader, queued ->
+      val cancelling = launch(start = CoroutineStart.UNDISPATCHED) { loader.cancelAndJoin() }
+      queued.join()
+      assertEquals(false, cancelling.isCompleted)
+    }
+  }
+
+  // 旧任务仍在清理时，替换排队加载的 load 和 cancelAndJoin 都在等待清理，它们不能继续持有已结束的排队加载
+  private fun checkEndedQueuedLoadReleasesCaptureDuringCleanup(endQueued: suspend CoroutineScope.(loader: FLoader, queued: Job) -> Unit) {
+    val loader = FLoader()
+    val scopeJob = SupervisorJob()
+    // 独立根 scope 让旧任务和结束排队加载的调用在 runTest 退出后的 GC 检查期间继续等待清理
+    val scope = CoroutineScope(scopeJob + Dispatchers.Unconfined)
+    val cleanupStarted = CompletableDeferred<Unit>()
+    val releaseCleanup = CompletableDeferred<Unit>()
+    val first = scope.launch(start = CoroutineStart.UNDISPATCHED) {
+      loader.loadForTest {
+        try {
+          awaitCancellation()
+        } finally {
+          withContext(NonCancellable) {
+            cleanupStarted.complete(Unit)
+            releaseCleanup.await()
+          }
+        }
+      }.getOrThrow()
+    }
+
+    try {
+      assertReleased(loader) {
+        val capture = Any()
+        val queued = scope.launch(start = CoroutineStart.UNDISPATCHED) {
+          runCatching { load { capture.hashCode() } }
+        }
+        assertEquals(true, cleanupStarted.isCompleted)
+        assertEquals(false, queued.isCompleted)
+
+        scope.endQueued(this, queued)
+        assertEquals(true, queued.isCompleted)
+        assertEquals(false, first.isCompleted)
+        assertEquals(true, isLoading())
+        capture
+      }
+      assertEquals(false, first.isCompleted)
+      assertEquals(true, loader.isLoading())
+    } finally {
+      releaseCleanup.complete(Unit)
+      runTest { scopeJob.cancelAndJoin() }
+    }
+  }
+
   private fun checkCancelledQueuedLoadReleasesReferenceDuringCleanup(captureCallback: Boolean) {
     val loader = FLoader()
     val scopeJob = SupervisorJob()

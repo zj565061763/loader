@@ -5,7 +5,6 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
-import kotlinx.coroutines.joinAll
 
 internal class FMutator(
   /** 创建[cancelAndJoin]取消任务的异常 */
@@ -35,12 +34,12 @@ internal class FMutator(
       mutateJob.ensureActive()
 
       // 成为最新任务，并取消上一个任务
-      synchronized(_lock) {
+      val (prevJob, runningJob) = synchronized(_lock) {
         (_job to _runningJob).also { _job = mutateJob }
-      }.also { (prevJob, runningJob) ->
-        prevJob?.cancel(newReplaceCause())
-        runningJob?.join()
       }
+      prevJob?.cancel(newReplaceCause())
+      // 等待期间不能再引用 prevJob，否则它结束后仍被持有
+      runningJob?.join()
 
       // 等待期间有更新的任务进入时放弃执行
       synchronized(_lock) {
@@ -73,12 +72,14 @@ internal class FMutator(
 
   suspend fun cancelAndJoin() {
     _mutateMutex.checkNested()
-    synchronized(_lock) {
-      listOfNotNull(_job, _runningJob).distinct()
-    }.also { jobs ->
-      jobs.forEach { it.cancel(newCancelCause()) }
-      jobs.joinAll()
+    val (job, runningJob) = synchronized(_lock) {
+      _job to _runningJob.takeIf { it !== _job }
     }
+    job?.cancel(newCancelCause())
+    runningJob?.cancel(newCancelCause())
+    // 逐个等待，等 runningJob 时不能再引用 job，否则它结束后仍被持有
+    job?.join()
+    runningJob?.join()
   }
 
   private fun Job.clearOnCompletion() {

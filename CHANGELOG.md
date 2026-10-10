@@ -5,6 +5,7 @@
 ### 🐛 Bug Fixes
 
 - **修复 `onLoad` 中启动的子协程失败时异常直接从 `load` 抛出**：此前在 `onLoad` 中用当前协程上下文启动子协程（如 `CoroutineScope(currentCoroutineContext()).launch`）时，`onLoad` 一返回 `isLoading` 就变为 `false`，子协程的普通异常会直接从 `load` / `tryLoad` 抛出。现在加载会等子协程结束，子协程的普通异常包装为 `Result.failure`。
+- **修复排队加载结束后仍被持有到旧任务清理结束**：此前排队中的 `load` 被新的 `load` 替换或被 `cancelAndJoin()` 取消后，在旧任务清理结束前，它的调用方和 `onLoad` 捕获的对象仍被 Loader 持有。现在排队加载结束后立即释放。
 
 ### 📝 Documentation
 
