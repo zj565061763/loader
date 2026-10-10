@@ -43,6 +43,7 @@ interface FLoader {
    *
    * [onLoad]中不允许嵌套调用[load]、[tryLoad]或[cancelAndJoin]，未捕获的嵌套异常会包装为[Result.failure]。
    * 嵌套检测依赖协程上下文，通过[runBlocking]、新线程或新的根协程作用域绕开原上下文时无法检测，可能导致死锁。
+   * 在[onLoad]内启动的协程如果继承了上下文但换成独立`Job`，即使加载已结束，调用这些方法也会被判为嵌套，直接抛出[IllegalStateException]。
    *
    * 在`flow {}`中不能在[onLoad]内调用`emit`，否则返回[Result.failure]。
    * 请改用[channelFlow]，或在[onLoad]外`emit`。
