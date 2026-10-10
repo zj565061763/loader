@@ -314,6 +314,16 @@ class LoaderTest {
   }
 
   @Test
+  fun `test load when timeout in cleanup after caller timeout`() = runTest {
+    checkTimeoutInCleanupAfterCallerTimeout(useTryLoad = false)
+  }
+
+  @Test
+  fun `test tryLoad when timeout in cleanup after caller timeout`() = runTest {
+    checkTimeoutInCleanupAfterCallerTimeout(useTryLoad = true)
+  }
+
+  @Test
   fun `test load when cancel`() = runTest {
     val loader = FLoader()
     var container = ""
@@ -3563,6 +3573,42 @@ class LoaderTest {
     val expectedType = if (replace) FLoader.ReplacedCancellationException::class else FLoader.ManualCancellationException::class
     assertEquals(expectedType, exceptionInBlock!!::class)
     assertEquals(expectedType, job.await()!!::class)
+    assertEquals(false, loader.isBusyFlow.value)
+    assertEquals(3, loader.tryLoad { 3 }.getOrThrow())
+  }
+
+  private suspend fun TestScope.checkTimeoutInCleanupAfterCallerTimeout(useTryLoad: Boolean) {
+    val loader = FLoader()
+    var exceptionInBlock: Throwable? = null
+    var cleanupException: Throwable? = null
+    val onLoad: suspend () -> Unit = {
+      try {
+        delay(Long.MAX_VALUE)
+      } catch (e: CancellationException) {
+        exceptionInBlock = e
+        throw e
+      } finally {
+        withContext(NonCancellable) {
+          try {
+            withTimeout(10) { delay(Long.MAX_VALUE) }
+          } catch (e: TimeoutCancellationException) {
+            cleanupException = e
+            throw e
+          }
+        }
+      }
+    }
+
+    // withTimeoutOrNull 只在超时异常属于自己时返回 null，否则原样抛出
+    val result = withTimeoutOrNull(100) {
+      if (useTryLoad) loader.tryLoad(onLoad) else loader.load(onLoad)
+    }
+
+    // 调用方超时后清理中再次超时，仍保留调用方的超时
+    assertTrue(exceptionInBlock is TimeoutCancellationException)
+    assertTrue(cleanupException is TimeoutCancellationException)
+    assertNull(result)
+    assertEquals(110, currentTime)
     assertEquals(false, loader.isBusyFlow.value)
     assertEquals(3, loader.tryLoad { 3 }.getOrThrow())
   }

@@ -2,6 +2,8 @@ package com.sd.lib.loader
 
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.channelFlow
 import kotlinx.coroutines.runBlocking
@@ -124,7 +126,11 @@ private class LoaderImpl : FLoader {
       // 等待 onLoad 用当前上下文启动的子协程结束，让其异常也包装为 Result.failure
       Result.success(coroutineScope { onLoad() })
     } catch (e: Throwable) {
-      if (e is CancellationException) throw e
+      if (e is CancellationException) {
+        // 加载已被取消时抛出它的取消原因，不让 onLoad 抛出的其他取消异常盖掉
+        currentCoroutineContext().ensureActive()
+        throw e
+      }
       Result.failure(e)
     }
   }
