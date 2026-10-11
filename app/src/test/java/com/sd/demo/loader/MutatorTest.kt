@@ -1106,6 +1106,7 @@ class MutatorTest {
         // 放行后结束回调把过期的 true 赋上去，复查后必须恢复 false
         assertTrue(queued.await() is FLoader.ReplacedCancellationException)
         assertEquals(3, latest.await())
+        assertTrue(first.await() is FLoader.ReplacedCancellationException)
         assertEquals(false, mutator.isBusy())
         assertEquals(false, mutator.isBusyFlow.value)
       } finally {
