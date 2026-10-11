@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 2.0.0
 
 ### ⚠️ Breaking Changes
 
@@ -41,7 +41,7 @@ loader.loadingFlow.collect { isLoading -> render(isLoading) }
 loader.stateFlow.collect { state -> render(state.isLoading) }
 val isLoading = loader.isLoading()
 
-// 新版本
+// 2.0.0
 loader.isBusyFlow.collect { isBusy -> render(isBusy) }
 val isBusy = loader.isBusy()
 ```
