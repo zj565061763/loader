@@ -33,6 +33,12 @@ class SampleActivity : ComponentActivity() {
         )
       }
     }
+
+    lifecycleScope.launch {
+      _loader.isBusyFlow.collect { isBusy ->
+        logMsg { "isBusy:$isBusy" }
+      }
+    }
   }
 
   private suspend fun load() {
