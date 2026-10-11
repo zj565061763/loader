@@ -11,6 +11,7 @@ import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.TimeoutCancellationException
+import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.cancel
@@ -41,6 +42,7 @@ import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.util.concurrent.ConcurrentLinkedQueue
+import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicReference
@@ -758,6 +760,42 @@ class LoaderTest {
     } finally {
       queuedScheduler.runCurrent()
       runCurrent()
+    }
+  }
+
+  @Test(timeout = 10_000)
+  fun `test isBusy is false after load completed before isBusyFlow synced`() = runTest {
+    Executors.newSingleThreadExecutor().asCoroutineDispatcher().use { loadDispatcher ->
+      val loader = FLoader()
+      val mutator = loader.readField("_mutator")
+      val entered = CompletableDeferred<Unit>()
+      val finishLoad = CompletableDeferred<Unit>()
+      val loadJob = async(loadDispatcher) {
+        loader.load {
+          entered.complete(Unit)
+          finishLoad.await()
+          1
+        }.getOrThrow()
+      }
+      try {
+        entered.await()
+
+        // 持有登记的锁再让加载结束：任务已完成，清空登记和同步状态流被锁挡住
+        synchronized(mutator.readField("_lock")) {
+          val job = mutator.readField("_job") as Job
+          finishLoad.complete(Unit)
+          while (!job.isCompleted) Thread.sleep(1)
+
+          // isBusy 看任务是否完成，不经过尚未同步的状态流
+          assertEquals(true, loader.isBusyFlow.value)
+          assertEquals(false, loader.isBusy())
+        }
+
+        assertEquals(1, loadJob.await())
+        assertEquals(false, loader.isBusyFlow.value)
+      } finally {
+        finishLoad.complete(Unit)
+      }
     }
   }
 
@@ -3454,6 +3492,11 @@ class LoaderTest {
     }.also { result ->
       assertSame(cancellation, result.exceptionOrNull())
     }
+  }
+
+  // 反射读取私有字段
+  private fun Any.readField(name: String): Any {
+    return checkNotNull(javaClass.getDeclaredField(name).also { it.isAccessible = true }.get(this))
   }
 
   private suspend fun TestScope.checkOtherLoaderCancelledInBlock(replace: Boolean) {
