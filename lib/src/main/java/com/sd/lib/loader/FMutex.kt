@@ -14,6 +14,9 @@ class FMutex {
   /**
    * 在互斥锁内执行[action]
    *
+   * 调用方已取消时不执行[action]；执行期间被取消时，即使[action]正常返回也抛出取消异常。
+   * 锁会等[action]内用当前协程上下文启动的子协程结束才释放，子协程的普通异常从[withLock]抛出。
+   *
    * [action]内不能调用同一实例的[withLock]，否则抛出[IllegalStateException]。
    * 嵌套检测依赖协程上下文，通过`runBlocking`、新线程或新的根协程作用域调用时检测不到，可能死锁。
    * 在[action]内启动的协程如果继承了上下文但换成独立`Job`，锁释放后调用同一实例仍会抛出[IllegalStateException]。
