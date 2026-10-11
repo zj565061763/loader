@@ -792,6 +792,9 @@ class MutatorTest {
           // 持锁期间让任务结束，它的清空被锁挡住
           finishTask.complete(Unit)
           assertEquals(true, awaitBlocked(thread) { task.isCompleted })
+          // 确认登记尚未清空，否则判忙看字段是否为 null 也会返回 false
+          assertEquals(true, mutator.readJobField("_job") != null)
+          assertEquals(true, mutator.readJobField("_runningJob") != null)
 
           // 判忙看任务是否完成，不看字段是否为 null
           releaseLock.countDown()
