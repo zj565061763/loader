@@ -579,8 +579,8 @@ class MutatorTest {
           assertEquals(true, awaitBlocked(thread) { task.isCompleted })
           assertEquals(false, task.isCompleted)
           // 清空之后的 isBusy 也会被锁挡住，还要确认登记尚未清空
-          assertEquals(true, mutator.readJobField("_job") != null)
-          assertEquals(true, mutator.readJobField("_runningJob") != null)
+          assertEquals(true, mutator.readField("_job") != null)
+          assertEquals(true, mutator.readField("_runningJob") != null)
 
           releaseLock.countDown()
           assertTrue(busy.await() is FLoader.BusyCancellationException)
@@ -793,8 +793,8 @@ class MutatorTest {
           finishTask.complete(Unit)
           assertEquals(true, awaitBlocked(thread) { task.isCompleted })
           // 确认登记尚未清空，否则判忙看字段是否为 null 也会返回 false
-          assertEquals(true, mutator.readJobField("_job") != null)
-          assertEquals(true, mutator.readJobField("_runningJob") != null)
+          assertEquals(true, mutator.readField("_job") != null)
+          assertEquals(true, mutator.readField("_runningJob") != null)
 
           // 判忙看任务是否完成，不看字段是否为 null
           releaseLock.countDown()
@@ -861,6 +861,95 @@ class MutatorTest {
           startQuery.complete(Unit)
           releaseLock.countDown()
         }
+      }
+    }
+  }
+
+  @Test(timeout = 10_000)
+  fun `test mutate registers task inside lock`() = runTest {
+    Executors.newSingleThreadExecutor().asCoroutineDispatcher().use { taskDispatcher ->
+      val mutator = newMutator()
+      val taskThread = CompletableDeferred<Thread>()
+      val startTask = CompletableDeferred<Unit>()
+      val entered = AtomicBoolean()
+      val task = async(taskDispatcher) {
+        taskThread.complete(Thread.currentThread())
+        startTask.await()
+        mutator.mutate {
+          entered.set(true)
+          1
+        }
+      }
+      try {
+        val thread = taskThread.await()
+
+        // 反射持有登记的锁再发起任务，它必须在登记时被锁挡住
+        synchronized(checkNotNull(mutator.readField("_lock"))) {
+          startTask.complete(Unit)
+          assertEquals(true, awaitBlocked(thread) { entered.get() })
+          // 登记之后的 isBusy 也会被锁挡住，还要确认尚未登记
+          assertEquals(null, mutator.readField("_job"))
+        }
+
+        assertEquals(1, task.await())
+        assertEquals(false, mutator.isBusy())
+      } finally {
+        startTask.complete(Unit)
+      }
+    }
+  }
+
+  @Test(timeout = 10_000)
+  fun `test queued task checks replacement inside lock`() = runTest {
+    Executors.newSingleThreadExecutor().asCoroutineDispatcher().use { queuedDispatcher ->
+      val mutator = newMutator()
+      val queuedThread = CompletableDeferred<Thread>()
+      val queuedEntered = AtomicBoolean()
+      val cleanupStarted = CompletableDeferred<Unit>()
+      val releaseCleanup = CompletableDeferred<Unit>()
+      val first = async {
+        runCatching {
+          mutator.mutate {
+            try {
+              awaitCancellation()
+            } finally {
+              withContext(NonCancellable) {
+                cleanupStarted.complete(Unit)
+                releaseCleanup.await()
+              }
+            }
+          }
+        }.exceptionOrNull()
+      }.also { runCurrent() }
+      val queued = async(queuedDispatcher) {
+        queuedThread.complete(Thread.currentThread())
+        mutator.mutate {
+          queuedEntered.set(true)
+          2
+        }
+      }
+      try {
+        val thread = queuedThread.await()
+        cleanupStarted.await()
+        // 等排队任务挂起在旧任务上再持锁，否则它可能停在登记后的 isBusy 上
+        while (thread.state != Thread.State.WAITING) Thread.sleep(1)
+
+        // 反射持有登记的锁再让旧任务在持锁线程上结束，排队任务恢复后必须在顶替判断时被锁挡住
+        synchronized(checkNotNull(mutator.readField("_lock"))) {
+          releaseCleanup.complete(Unit)
+          runCurrent()
+          assertEquals(true, first.isCompleted)
+          assertEquals(true, awaitBlocked(thread) { queuedEntered.get() })
+          assertEquals(false, queuedEntered.get())
+          // 结束时的清空也会被锁挡住，还要确认尚未登记为运行任务
+          assertEquals(null, mutator.readField("_runningJob"))
+        }
+
+        assertEquals(2, queued.await())
+        assertTrue(first.await() is FLoader.ReplacedCancellationException)
+        assertEquals(false, mutator.isBusy())
+      } finally {
+        releaseCleanup.complete(Unit)
       }
     }
   }
@@ -967,6 +1056,64 @@ class MutatorTest {
     }
   }
 
+  // 结束回调读到忙之后、赋值之前，其他任务整个结束：过期的 true 赋上去后必须重新同步
+  @Test(timeout = 10_000)
+  fun `test isBusyFlow is resynced after stale value assigned`() = runTest {
+    Executors.newSingleThreadExecutor().asCoroutineDispatcher().use { queuedDispatcher ->
+      val mutator = newMutator()
+      val queuedThread = CompletableDeferred<Thread>()
+      val cleanupStarted = CompletableDeferred<Unit>()
+      val releaseCleanup = CompletableDeferred<Unit>()
+      val first = async {
+        runCatching {
+          mutator.mutate {
+            try {
+              awaitCancellation()
+            } finally {
+              withContext(NonCancellable) {
+                cleanupStarted.complete(Unit)
+                releaseCleanup.await()
+              }
+            }
+          }
+        }.exceptionOrNull()
+      }.also { runCurrent() }
+      val queued = async(queuedDispatcher) {
+        queuedThread.complete(Thread.currentThread())
+        runCatching { mutator.mutate { 2 } }.exceptionOrNull()
+      }
+      try {
+        val thread = queuedThread.await()
+        cleanupStarted.await()
+        // 等排队任务挂起在旧任务上再持锁，否则它可能停在登记后的同步上
+        while (thread.state != Thread.State.WAITING) Thread.sleep(1)
+
+        // 状态流赋值时会对自身加锁，借它把排队任务的结束回调挡在读取和赋值之间
+        val latest = synchronized(checkNotNull(mutator.readField("_isBusyFlow"))) {
+          // 最新任务顶替排队任务，排队任务的结束回调读到忙后停在赋值上
+          val latest = async { mutator.mutate { 3 } }.also { runCurrent() }
+          assertEquals(true, awaitBlocked(thread) { queued.isCompleted })
+          assertEquals(false, queued.isCompleted)
+
+          // 旧任务和最新任务在持锁线程上结束，状态流同步为 false
+          releaseCleanup.complete(Unit)
+          runCurrent()
+          assertEquals(true, latest.isCompleted)
+          assertEquals(false, mutator.isBusyFlow.value)
+          latest
+        }
+
+        // 放行后结束回调把过期的 true 赋上去，复查后必须恢复 false
+        assertTrue(queued.await() is FLoader.ReplacedCancellationException)
+        assertEquals(3, latest.await())
+        assertEquals(false, mutator.isBusy())
+        assertEquals(false, mutator.isBusyFlow.value)
+      } finally {
+        releaseCleanup.complete(Unit)
+      }
+    }
+  }
+
   // 收集者在状态流的赋值调用中内联执行；赋值在锁内的话，收集者卡住期间其他线程读取登记会被挡住
   private suspend fun TestScope.checkBusyFlowUpdatedOutsideLock(useTryLoad: Boolean) {
     Executors.newSingleThreadExecutor().asCoroutineDispatcher().use { taskDispatcher ->
@@ -1026,8 +1173,8 @@ class MutatorTest {
     return false
   }
 
-  // 反射读取私有的任务登记字段
-  private fun FMutator.readJobField(name: String): Any? {
+  // 反射读取私有字段
+  private fun FMutator.readField(name: String): Any? {
     return FMutator::class.java.getDeclaredField(name).also { it.isAccessible = true }.get(this)
   }
 

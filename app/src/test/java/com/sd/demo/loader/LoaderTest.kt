@@ -25,6 +25,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.joinAll
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.TestCoroutineScheduler
 import kotlinx.coroutines.test.TestScope
@@ -789,6 +790,10 @@ class LoaderTest {
           // isBusy 看任务是否完成，不经过尚未同步的状态流
           assertEquals(true, loader.isBusyFlow.value)
           assertEquals(false, loader.isBusy())
+
+          // tryLoad 的判忙与 isBusy 一致：登记尚未清空、状态流仍为 true 时也不判忙；锁可重入，在持锁线程上调用
+          assertSame(job, mutator.readField("_job"))
+          assertEquals(2, runBlocking { loader.tryLoad { 2 } }.getOrThrow())
         }
 
         assertEquals(1, loadJob.await())
