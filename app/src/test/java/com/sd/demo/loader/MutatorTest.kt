@@ -578,6 +578,9 @@ class MutatorTest {
           finishTask.complete(Unit)
           assertEquals(true, awaitBlocked(thread) { task.isCompleted })
           assertEquals(false, task.isCompleted)
+          // 清空之后的 isBusy 也会被锁挡住，还要确认登记尚未清空
+          assertEquals(true, mutator.readJobField("_job") != null)
+          assertEquals(true, mutator.readJobField("_runningJob") != null)
 
           releaseLock.countDown()
           assertTrue(busy.await() is FLoader.BusyCancellationException)
@@ -1018,6 +1021,11 @@ class MutatorTest {
       Thread.sleep(1)
     }
     return false
+  }
+
+  // 反射读取私有的任务登记字段
+  private fun FMutator.readJobField(name: String): Any? {
+    return FMutator::class.java.getDeclaredField(name).also { it.isAccessible = true }.get(this)
   }
 
   // 任务已登记为运行任务但尚未进入回调时被取消或替换，load 与 tryLoad 的登记路径不同，需分别覆盖
