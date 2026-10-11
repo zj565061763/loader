@@ -64,7 +64,8 @@ interface FLoader {
   suspend fun <T> tryLoad(onLoad: suspend () -> T): Result<T>
 
   /**
-   * 取消加载，并等待取消完成。
+   * 取消调用时已发起的加载，并等待取消完成，之后发起的加载不受影响。
+   * 还没开始执行就被新的[load]替换的加载不在等待范围内：返回时，它的[load]可能还没抛出[ReplacedCancellationException]。
    * 调用方已取消时仍会发起取消，但不保证等待完成，可能抛出[CancellationException]；
    * 在调用方的`finally`中需要等待完成时，请使用`withContext(NonCancellable)`。
    */
