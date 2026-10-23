@@ -936,10 +936,11 @@ class MutatorTest {
       try {
         val thread = queuedThread.await()
         cleanupStarted.await()
-        // 等排队任务挂起在旧任务上再持锁，否则它可能停在登记后的 isBusy 上
+        // 等排队任务挂起在旧任务上再持锁，否则它可能停在登记后的 isBusy 上，去掉顶替判断的锁也照样通过
         while (thread.state != Thread.State.WAITING) Thread.sleep(1)
 
-        // 反射持有登记的锁再让旧任务在持锁线程上结束，排队任务恢复后必须在顶替判断时被锁挡住
+        // 反射持有登记的锁再让旧任务在持锁线程上结束，排队任务恢复后必须在顶替判断时被锁挡住。
+        // 旧任务的结束回调要重入锁，换成其他线程持锁时回调被挡住，排队任务无法恢复。
         synchronized(checkNotNull(mutator.readField("_lock"))) {
           releaseCleanup.complete(Unit)
           runCurrent()
@@ -1095,7 +1096,8 @@ class MutatorTest {
 
         // 状态流赋值时会对自身加锁，借它把排队任务的结束回调挡在读取和赋值之间
         val latest = synchronized(checkNotNull(mutator.readField("_isBusyFlow"))) {
-          // 最新任务顶替排队任务，排队任务的结束回调读到忙后停在赋值上
+          // 最新任务顶替排队任务，排队任务的结束回调读到忙后停在赋值上。
+          // 挡住的必须是没人等待的任务的回调：等待它的任务要等回调执行完才恢复，无法在回调被挡住期间结束。
           val latest = async { mutator.mutate { 3 } }.also { runCurrent() }
           assertEquals(true, awaitBlocked(thread) { queued.isCompleted })
           assertEquals(false, queued.isCompleted)
