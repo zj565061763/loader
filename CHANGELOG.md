@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### 📝 Documentation
+
+- **补充 `isBusyFlow` 收到值时的加载进度**：收到 `true` 时 `onLoad` 可能还没开始。收到 `false` 时上一次加载可能还没返回。
+
 ## 2.0.0
 
 ### ⚠️ Breaking Changes

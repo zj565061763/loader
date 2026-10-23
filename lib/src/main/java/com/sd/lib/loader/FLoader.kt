@@ -14,6 +14,8 @@ interface FLoader {
   /**
    * 是否繁忙的状态流，取值含义同[isBusy]。
    * 快速变化的中间值可能被合并。
+   * 收到 true 时`onLoad`可能还没开始。
+   * 收到 false 时上一次加载可能还没返回。
    * 多线程下它的值可能略晚于[isBusy]：收到 false 时其他线程可能已经开始新的加载。
    * 只是状态通知，不能用来先判断再调用[tryLoad]。
    */
@@ -21,7 +23,7 @@ interface FLoader {
 
   /**
    * 是否繁忙，即是否有尚未结束的加载，等待上一次加载结束的和取消后仍在清理的也算。
-   * 等待期间被新的[load]替换的加载不算：返回 false 时，它的[load]可能还没抛出[ReplacedCancellationException]。
+   * 还没开始执行就被新的[load]替换的加载不算：返回 false 时，它的[load]可能还没抛出[ReplacedCancellationException]。
    * 繁忙时[tryLoad]会抛出[BusyCancellationException]。
    * 只是调用时刻的快照，不能用来先判断再调用[tryLoad]。
    */
@@ -66,7 +68,7 @@ interface FLoader {
   /**
    * 取消调用时已发起的加载，并等待取消完成，之后发起的加载不受影响。
    * 还没开始执行就被新的[load]替换的加载不在等待范围内：返回时，它的[load]可能还没抛出[ReplacedCancellationException]。
-   * 调用方已取消时仍会发起取消，但不保证等待完成，可能抛出[CancellationException]；
+   * 调用方已取消时仍会发起取消，但不保证等待完成，可能抛出[CancellationException]。
    * 在调用方的`finally`中需要等待完成时，请使用`withContext(NonCancellable)`。
    */
   suspend fun cancelAndJoin()

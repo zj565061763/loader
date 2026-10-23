@@ -21,10 +21,16 @@ internal class FMutator(
   /** 保护[_job]和[_runningJob]，锁内不能挂起 */
   private val _lock = Any()
 
-  /** 最近进入的任务，可能还在等待[_runningJob]结束 */
+  /**
+   * 最近进入的任务，可能还在等待[_runningJob]结束。
+   * 结束后到清空登记前仍指向它。
+   */
   private var _job: Job? = null
 
-  /** 已开始执行 block 的任务，新任务要等它结束才能执行 */
+  /**
+   * 获准执行 block 的任务，新任务要等它结束才能执行。
+   * 结束后到清空登记前仍指向它。
+   */
   private var _runningJob: Job? = null
 
   /** 串行执行用户 block，并提供同一实例的嵌套调用检测 */
@@ -35,7 +41,10 @@ internal class FMutator(
   /** [isBusy]的状态流，快速变化的中间值可能被合并 */
   val isBusyFlow: StateFlow<Boolean> = _isBusyFlow.asStateFlow()
 
-  /** 取消上一个任务并等待它结束，再执行[block] */
+  /**
+   * 取消上一个任务，等待运行中的任务结束后执行[block]。
+   * 登记后、获准执行前被更新的任务顶替时不执行[block]，以替换原因取消自己。
+   */
   suspend fun <T> mutate(block: suspend () -> T): T {
     _mutateMutex.checkNested()
     return coroutineScope {
@@ -52,14 +61,17 @@ internal class FMutator(
       // 等待期间不能再引用 prevJob，否则它结束后仍被持有
       runningJob?.join()
 
-      // 仍是最新任务才登记为运行任务，否则已被更新的任务顶替，取消自己
-      synchronized(_lock) {
-        (_job !== mutateJob).also { if (!it) _runningJob = mutateJob }
-      }.also { replaced ->
-        if (replaced) mutateJob.cancel(newReplaceCause())
+      // 仍是最新任务才登记为运行任务，否则已被更新的任务顶替
+      val isLatest = synchronized(_lock) {
+        (_job === mutateJob).also { if (it) _runningJob = mutateJob }
+      }
+      if (!isLatest) {
+        // 取消自己后直接退出，不进入 doMutate。
+        // 否则跨线程并发时可能先于最新任务拿到 _mutateMutex，让它多挂起一次。
+        mutateJob.cancel(newReplaceCause())
+        mutateJob.ensureActive()
       }
 
-      // 被顶替时 doMutate 会检查到取消，不执行 block
       doMutate(block)
     }
   }
@@ -84,7 +96,7 @@ internal class FMutator(
     }
   }
 
-  /** 取消调用时已进入的任务，并等待它们结束 */
+  /** 取消调用时的最新任务和运行中的任务并等待它们结束，不包括被顶替的排队任务 */
   suspend fun cancelAndJoin() {
     _mutateMutex.checkNested()
 
@@ -99,7 +111,7 @@ internal class FMutator(
     runningJob?.join()
   }
 
-  /** 是否有尚未结束的任务，等待中或清理中的也算 */
+  /** 最新任务或运行中的任务尚未结束时为忙，被顶替的排队任务不算 */
   fun isBusy(): Boolean {
     return synchronized(_lock) {
       _job?.isCompleted == false || _runningJob?.isCompleted == false

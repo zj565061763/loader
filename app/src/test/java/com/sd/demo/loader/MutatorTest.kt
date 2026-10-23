@@ -55,7 +55,7 @@ class MutatorTest {
       val releaseCaller = CountDownLatch(1)
       val probePaused = AtomicBoolean()
       val callbackEntered = AtomicBoolean()
-      val contextProbe = PauseOnRepeatedContextKey {
+      val contextProbe = RepeatedContextKeyProbe {
         probePaused.set(true)
         callerPaused.complete(Unit)
         check(releaseCaller.await(5, TimeUnit.SECONDS))
@@ -121,7 +121,7 @@ class MutatorTest {
       val releaseCaller = CountDownLatch(1)
       val callbackEntered = AtomicBoolean()
       var thrown: Throwable? = null
-      val contextProbe = PauseOnRepeatedContextKey {
+      val contextProbe = RepeatedContextKeyProbe {
         callerPaused.complete(Unit)
         check(releaseCaller.await(5, TimeUnit.SECONDS))
       }
@@ -333,8 +333,9 @@ class MutatorTest {
     }
   }
 
+  // 进入 doMutate 会在 FMutex.withLock 里再次查询嵌套 key，探针借此发现被顶替的任务进入了锁
   @Test(timeout = 10_000)
-  fun `test replaced queued task is not registered as running task`() = runTest {
+  fun `test replaced queued task is not registered as running task and exits without entering mutex`() = runTest {
     Executors.newSingleThreadExecutor().asCoroutineDispatcher().use { queuedDispatcher ->
       Executors.newSingleThreadExecutor().asCoroutineDispatcher().use { latestDispatcher ->
         val replacements = AtomicInteger()
@@ -345,7 +346,9 @@ class MutatorTest {
         val cleanupStarted = CompletableDeferred<Unit>()
         val releaseCleanup = CompletableDeferred<Unit>()
         val queuedEntered = AtomicBoolean()
+        val queuedReachedMutex = AtomicBoolean()
         val latestEntered = AtomicBoolean()
+        val contextProbe = RepeatedContextKeyProbe { queuedReachedMutex.set(true) }
         val mutator = FMutator(
           newCancelCause = { FLoader.ManualCancellationException() },
           newReplaceCause = {
@@ -370,7 +373,7 @@ class MutatorTest {
           runCatching {
             mutator.mutate {
               try {
-                delay(Long.MAX_VALUE)
+                awaitCancellation()
               } finally {
                 withContext(NonCancellable) {
                   cleanupStarted.complete(Unit)
@@ -382,7 +385,8 @@ class MutatorTest {
         }.also { runCurrent() }
 
         try {
-          val queued = async(queuedDispatcher) {
+          val queued = async(queuedDispatcher + contextProbe) {
+            contextProbe.arm()
             runCatching { mutator.mutate { queuedEntered.set(true) } }.exceptionOrNull()
           }
           cleanupStarted.await()
@@ -398,9 +402,10 @@ class MutatorTest {
           val cancelJob = launch { mutator.cancelAndJoin() }.also { runCurrent() }
           assertEquals(false, cancelJob.isCompleted)
 
-          // 被顶替的排队任务不是运行任务，cancelAndJoin 取消不到它，它仍以替换原因退出
+          // 被顶替的排队任务不是运行任务，cancelAndJoin 取消不到它，它仍以替换原因退出，且不进入 doMutate
           allowQueuedCancel.countDown()
           assertTrue(queued.await() is FLoader.ReplacedCancellationException)
+          assertEquals(false, queuedReachedMutex.get())
           assertEquals(false, queuedEntered.get())
 
           allowLatestCancel.countDown()
@@ -1188,7 +1193,7 @@ class MutatorTest {
       val probePaused = AtomicBoolean()
       val callbackEntered = AtomicBoolean()
       val replacementEntered = AtomicBoolean()
-      val contextProbe = PauseOnRepeatedContextKey {
+      val contextProbe = RepeatedContextKeyProbe {
         probePaused.set(true)
         callerPaused.complete(Unit)
         check(releaseCaller.await(5, TimeUnit.SECONDS))
@@ -1243,7 +1248,12 @@ class MutatorTest {
     }
   }
 
-  private class PauseOnRepeatedContextKey(private val onRepeatedKey: () -> Unit) : AbstractCoroutineContextElement(Key) {
+  /**
+   * 上下文探针：`arm()` 后再次查询同一 key 时执行[onRepeatedKey]，用于暂停任务或记录它到达了某处。
+   *
+   * 首次查询来自入口嵌套检查，再次查询来自 `FMutex.withLock` 的嵌套检查，此时任务已登记并进入了锁。
+   */
+  private class RepeatedContextKeyProbe(private val onRepeatedKey: () -> Unit) : AbstractCoroutineContextElement(Key) {
     private var _armed = false
     private var _firstKey: CoroutineContext.Key<*>? = null
 
@@ -1253,7 +1263,6 @@ class MutatorTest {
 
     override fun <E : CoroutineContext.Element> get(key: CoroutineContext.Key<E>): E? {
       if (_armed) {
-        // 首次查询来自入口嵌套检查，再次查询同一 key 时任务已登记
         if (_firstKey == null) {
           _firstKey = key
         } else if (key === _firstKey) {
@@ -1264,6 +1273,6 @@ class MutatorTest {
       return super.get(key)
     }
 
-    companion object Key : CoroutineContext.Key<PauseOnRepeatedContextKey>
+    companion object Key : CoroutineContext.Key<RepeatedContextKeyProbe>
   }
 }
