@@ -1,6 +1,10 @@
 # Changelog
 
-## Unreleased
+## 2.0.1
+
+### 🐛 Bug Fixes
+
+- **修正 POM 中的许可证**：此前发布的 POM 声明为 Apache 2.0，与仓库的 `LICENSE` 不一致。现在改为 MIT。
 
 ### 📝 Documentation
 
