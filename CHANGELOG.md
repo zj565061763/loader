@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.0.2
+
+### 🐛 Bug Fixes
+
+- **修复 `kotlin_module` 文件名冲突**：此前 AAR 中的 `META-INF/lib_release.kotlin_module` 可能与其他库重名，现改为 `META-INF/com.sd.lib.loader_release.kotlin_module`。
+
 ## 2.0.1
 
 ### 🐛 Bug Fixes
