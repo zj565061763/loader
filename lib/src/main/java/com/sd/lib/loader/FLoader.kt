@@ -84,7 +84,9 @@ interface FLoader {
 }
 
 /** 创建一个[FLoader] */
-fun FLoader(): FLoader = LoaderImpl()
+fun FLoader(): FLoader {
+  return LoaderImpl()
+}
 
 /** 对[runCatching]的包装，如果是取消异常则抛出 */
 inline fun <R> safeRunCatching(block: () -> R): Result<R> {
@@ -123,18 +125,18 @@ private class LoaderImpl : FLoader {
   override suspend fun cancelAndJoin() {
     _mutator.cancelAndJoin()
   }
+}
 
-  private suspend fun <T> doLoad(onLoad: suspend () -> T): Result<T> {
-    return try {
-      // 等待 onLoad 用当前上下文启动的子协程结束，让其异常也包装为 Result.failure
-      Result.success(coroutineScope { onLoad() })
-    } catch (e: Throwable) {
-      if (e is CancellationException) {
-        // 加载已被取消时抛出它的取消原因，不让 onLoad 抛出的其他取消异常盖掉
-        currentCoroutineContext().ensureActive()
-        throw e
-      }
-      Result.failure(e)
+private suspend fun <T> doLoad(onLoad: suspend () -> T): Result<T> {
+  return try {
+    // 等待 onLoad 用当前上下文启动的子协程结束，让其异常也包装为 Result.failure
+    Result.success(coroutineScope { onLoad() })
+  } catch (e: Throwable) {
+    if (e is CancellationException) {
+      // 加载已被取消时抛出它的取消原因，不让 onLoad 抛出的其他取消异常盖掉
+      currentCoroutineContext().ensureActive()
+      throw e
     }
+    Result.failure(e)
   }
 }
