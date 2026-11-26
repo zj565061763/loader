@@ -6,6 +6,7 @@
 
 - **新增 `FLoader.cancel()`**：取消调用时已发起的加载，不等待取消完成，之后发起的加载不受影响。在加载回调内调用不会抛出 `IllegalStateException`，但会一并取消已在等待的新 `load`。
 - **调整 `FLoader.ManualCancellationException` 的消息**：异常消息由 `Cancelled by cancelAndJoin` 改为 `Cancelled manually`。
+- **支持通过 JitPack 引入**：使用 `com.github.zj565061763:loader` 坐标，版本号填写 Git 标签。
 
 ## 2.0.2
 
