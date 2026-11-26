@@ -36,17 +36,17 @@ interface FLoader {
    * 加载会等[onLoad]内用当前协程上下文启动的子协程结束，子协程的普通异常同样包装为[Result.failure]。
    *
    * 加载被取消时抛出取消异常，不返回[Result]，[onLoad]内收到的也是同一类型：
-   * 被[cancelAndJoin]取消时是[ManualCancellationException]，
+   * 被[cancel]或[cancelAndJoin]取消时是[ManualCancellationException]，
    * 被新的[load]替换时是[ReplacedCancellationException]，
    * 被调用方取消时是调用方的取消原因。
-   * 多次取消时只保留最先的原因，例如先被替换再被[cancelAndJoin]取消，抛出的仍是[ReplacedCancellationException]。
-   * 在[NonCancellable]中调用时只是不会被调用方取消，仍会被[cancelAndJoin]取消或被新的[load]替换。
+   * 多次取消时只保留最先的原因，例如先被替换再被[cancel]或[cancelAndJoin]取消，抛出的仍是[ReplacedCancellationException]。
+   * 在[NonCancellable]中调用时只是不会被调用方取消，仍会被[cancel]或[cancelAndJoin]取消，或被新的[load]替换。
    * 多个 Loader 嵌套使用时，[ManualCancellationException]和[ReplacedCancellationException]也可能来自外层或内层的 Loader，不代表当前 Loader 被取消。
    *
-   * [onLoad]内不能调用同一个 Loader 的[load]、[tryLoad]或[cancelAndJoin]，
+   * [onLoad]内不能调用同一个 Loader 的[load]、[tryLoad]或[cancelAndJoin]（[cancel]除外），
    * 否则抛出[IllegalStateException]，不捕获的话会包装为[Result.failure]。
    * 嵌套检测依赖协程上下文，通过[runBlocking]、新线程或新的根协程作用域调用时检测不到，可能死锁。
-   * 在[onLoad]内启动的协程如果继承了上下文但换成独立`Job`，加载结束后调用这些方法仍会抛出[IllegalStateException]。
+   * 在[onLoad]内启动的协程如果继承了上下文但换成独立`Job`，加载结束后调用[load]、[tryLoad]或[cancelAndJoin]仍会抛出[IllegalStateException]。
    *
    * 在`flow {}`中不能在[onLoad]内调用`emit`，否则返回[Result.failure]。
    * 请改用[channelFlow]，或在[onLoad]外`emit`。
@@ -66,6 +66,13 @@ interface FLoader {
   suspend fun <T> tryLoad(onLoad: suspend () -> T): Result<T>
 
   /**
+   * 取消调用时已发起的加载，不等待取消完成，之后发起的加载不受影响。
+   * 返回时加载可能尚未结束，[isBusy]仍可能为 true，需要等待完成时请使用[cancelAndJoin]。
+   * 在加载回调内调用不会抛出[IllegalStateException]，但会一并取消已在等待的新[load]。
+   */
+  fun cancel()
+
+  /**
    * 取消调用时已发起的加载，并等待取消完成，之后发起的加载不受影响。
    * 还没开始执行就被新的[load]替换的加载不在等待范围内：返回时，它的[load]可能还没抛出[ReplacedCancellationException]。
    * 调用方已取消时仍会发起取消，但不保证等待完成，可能抛出[CancellationException]。
@@ -73,8 +80,8 @@ interface FLoader {
    */
   suspend fun cancelAndJoin()
 
-  /** 加载被[cancelAndJoin]取消时抛出的取消异常 */
-  class ManualCancellationException : CancellationException("Cancelled by cancelAndJoin")
+  /** 加载被[cancel]或[cancelAndJoin]取消时抛出的取消异常 */
+  class ManualCancellationException : CancellationException("Cancelled manually")
 
   /** 加载被新的[load]替换时抛出的取消异常 */
   class ReplacedCancellationException : CancellationException("Cancelled by new load")
@@ -120,6 +127,10 @@ private class LoaderImpl : FLoader {
     return _mutator.mutateOrThrow {
       doLoad(onLoad)
     }
+  }
+
+  override fun cancel() {
+    _mutator.cancel()
   }
 
   override suspend fun cancelAndJoin() {

@@ -495,55 +495,71 @@ class MutatorTest {
     }
   }
 
+  @Test
+  fun `test cancel cancels running and queued tasks without waiting`() = runTest {
+    val mutator = newMutator()
+    val cleanupStarted = CompletableDeferred<Unit>()
+    val releaseCleanup = CompletableDeferred<Unit>()
+    var replacedEntered = false
+    var queuedEntered = false
+
+    val first = async {
+      runCatching {
+        mutator.mutate {
+          try {
+            awaitCancellation()
+          } finally {
+            withContext(NonCancellable) {
+              cleanupStarted.complete(Unit)
+              releaseCleanup.await()
+            }
+          }
+        }
+      }.exceptionOrNull()
+    }.also { runCurrent() }
+
+    val replaced = async {
+      runCatching { mutator.mutate { replacedEntered = true } }.exceptionOrNull()
+    }.also { runCurrent() }
+
+    val queued = async {
+      runCatching { mutator.mutate { queuedEntered = true } }.exceptionOrNull()
+    }.also { runCurrent() }
+
+    try {
+      cleanupStarted.await()
+      assertTrue(replaced.await() is FLoader.ReplacedCancellationException)
+      assertEquals(false, replacedEntered)
+      assertEquals(false, queued.isCompleted)
+
+      // cancel 只发起取消不等待清理，返回时旧任务仍在清理，仍算忙
+      mutator.cancel()
+      assertTrue(queued.await() is FLoader.ManualCancellationException)
+      assertEquals(false, queuedEntered)
+      assertEquals(false, first.isCompleted)
+      assertEquals(true, mutator.isBusy())
+      assertEquals(true, mutator.isBusyFlow.value)
+      assertTrue(runCatching { mutator.mutateOrThrow { 2 } }.exceptionOrNull() is FLoader.BusyCancellationException)
+
+      releaseCleanup.complete(Unit)
+      // 先被替换再被 cancel 取消的运行任务保留最先的替换原因
+      assertTrue(first.await() is FLoader.ReplacedCancellationException)
+      assertEquals(false, mutator.isBusy())
+      assertEquals(false, mutator.isBusyFlow.value)
+      assertEquals(3, mutator.mutateOrThrow { 3 })
+    } finally {
+      releaseCleanup.complete(Unit)
+    }
+  }
+
+  @Test(timeout = 10_000)
+  fun `test cancel cancels queued task before running task`() = runTest {
+    checkCancelQueuedBeforeRunning(join = false)
+  }
+
   @Test(timeout = 10_000)
   fun `test cancelAndJoin cancels queued task before running task`() = runTest {
-    Executors.newSingleThreadExecutor().asCoroutineDispatcher().use { queuedDispatcher ->
-      val cancelCauses = AtomicInteger()
-      val queuedRegistered = CompletableDeferred<Unit>()
-      val allowQueuedCancel = CountDownLatch(1)
-      val queuedFinished = CountDownLatch(1)
-      val queuedEntered = AtomicBoolean()
-      val mutator = FMutator(
-        newCancelCause = {
-          if (cancelCauses.incrementAndGet() == 2) {
-            // 第一个任务已取消、第二个尚未取消时，放行排队任务让它尝试执行
-            allowQueuedCancel.countDown()
-            check(queuedFinished.await(5, TimeUnit.SECONDS))
-          }
-          FLoader.ManualCancellationException()
-        },
-        newReplaceCause = {
-          queuedRegistered.complete(Unit)
-          check(allowQueuedCancel.await(5, TimeUnit.SECONDS))
-          FLoader.ReplacedCancellationException()
-        },
-        newBusyCause = { FLoader.BusyCancellationException() },
-      )
-
-      // 运行中任务在 Unconfined 上，取消时会在取消方线程内联结束
-      val first = async(Dispatchers.Unconfined) {
-        runCatching { mutator.mutate { awaitCancellation() } }.exceptionOrNull()
-      }
-      val queued = async(queuedDispatcher) {
-        runCatching { mutator.mutate { queuedEntered.set(true) } }.exceptionOrNull()
-      }
-      queued.invokeOnCompletion { queuedFinished.countDown() }
-
-      try {
-        queuedRegistered.await()
-        mutator.cancelAndJoin()
-        // 先取消排队任务再取消运行任务，排队任务才不会趁运行任务内联结束时开始执行
-        assertEquals(false, queuedEntered.get())
-        assertTrue(queued.await() is FLoader.ManualCancellationException)
-        assertTrue(first.await() is FLoader.ReplacedCancellationException)
-        assertEquals(3, mutator.mutateOrThrow { 3 })
-      } finally {
-        allowQueuedCancel.countDown()
-        queuedFinished.countDown()
-        first.cancelAndJoin()
-        queued.cancelAndJoin()
-      }
-    }
+    checkCancelQueuedBeforeRunning(join = true)
   }
 
   @Test(timeout = 10_000)
@@ -600,59 +616,13 @@ class MutatorTest {
   }
 
   @Test(timeout = 10_000)
+  fun `test cancel reads registration inside lock`() = runTest {
+    checkCancelReadsRegistrationInsideLock(join = false)
+  }
+
+  @Test(timeout = 10_000)
   fun `test cancelAndJoin reads registration inside lock`() = runTest {
-    Executors.newSingleThreadExecutor().asCoroutineDispatcher().use { cancelDispatcher ->
-      Executors.newSingleThreadExecutor().asCoroutineDispatcher().use { lockDispatcher ->
-        val lockHeld = CompletableDeferred<Unit>()
-        val releaseLock = CountDownLatch(1)
-        val cancelThread = CompletableDeferred<Thread>()
-        val startCancel = CompletableDeferred<Unit>()
-        val cancelCauseCreated = AtomicBoolean()
-        val mutator = FMutator(
-          newCancelCause = {
-            cancelCauseCreated.set(true)
-            FLoader.ManualCancellationException()
-          },
-          newReplaceCause = { FLoader.ReplacedCancellationException() },
-          newBusyCause = {
-            // 忙异常在锁内创建，借它从外部持有锁
-            lockHeld.complete(Unit)
-            check(releaseLock.await(5, TimeUnit.SECONDS))
-            FLoader.BusyCancellationException()
-          },
-        )
-
-        val first = async {
-          runCatching { mutator.mutate { awaitCancellation() } }.exceptionOrNull()
-        }.also { runCurrent() }
-        val cancelJob = launch(cancelDispatcher) {
-          cancelThread.complete(Thread.currentThread())
-          startCancel.await()
-          mutator.cancelAndJoin()
-        }
-        try {
-          val thread = cancelThread.await()
-          val busy = async(lockDispatcher) {
-            runCatching { mutator.mutateOrThrow { 2 } }.exceptionOrNull()
-          }
-          lockHeld.await()
-
-          // 持锁期间发起 cancelAndJoin，它必须在读取登记时被锁挡住，此时还没有发起取消
-          startCancel.complete(Unit)
-          assertEquals(true, awaitBlocked(thread) { cancelCauseCreated.get() })
-          assertEquals(false, cancelCauseCreated.get())
-
-          releaseLock.countDown()
-          assertTrue(busy.await() is FLoader.BusyCancellationException)
-          cancelJob.join()
-          assertTrue(first.await() is FLoader.ManualCancellationException)
-          assertEquals(3, mutator.mutateOrThrow { 3 })
-        } finally {
-          startCancel.complete(Unit)
-          releaseLock.countDown()
-        }
-      }
-    }
+    checkCancelReadsRegistrationInsideLock(join = true)
   }
 
   @Test
@@ -1170,17 +1140,6 @@ class MutatorTest {
     newBusyCause = { FLoader.BusyCancellationException() },
   )
 
-  // 等目标线程被锁挡住；目标操作越过了锁或超时则返回 false
-  private fun awaitBlocked(thread: Thread, passed: () -> Boolean): Boolean {
-    val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5)
-    while (System.nanoTime() < deadline) {
-      if (passed()) return false
-      if (thread.state == Thread.State.BLOCKED) return true
-      Thread.sleep(1)
-    }
-    return false
-  }
-
   // 反射读取私有字段
   private fun FMutator.readField(name: String): Any? {
     return FMutator::class.java.getDeclaredField(name).also { it.isAccessible = true }.get(this)
@@ -1277,4 +1236,124 @@ class MutatorTest {
 
     companion object Key : CoroutineContext.Key<RepeatedContextKeyProbe>
   }
+}
+
+private suspend fun TestScope.checkCancelQueuedBeforeRunning(join: Boolean) {
+  Executors.newSingleThreadExecutor().asCoroutineDispatcher().use { queuedDispatcher ->
+    val cancelCauses = AtomicInteger()
+    val queuedRegistered = CompletableDeferred<Unit>()
+    val allowQueuedCancel = CountDownLatch(1)
+    val queuedFinished = CountDownLatch(1)
+    val queuedEntered = AtomicBoolean()
+    val mutator = FMutator(
+      newCancelCause = {
+        if (cancelCauses.incrementAndGet() == 2) {
+          // 第一个任务已取消、第二个尚未取消时，放行排队任务让它尝试执行
+          allowQueuedCancel.countDown()
+          check(queuedFinished.await(5, TimeUnit.SECONDS))
+        }
+        FLoader.ManualCancellationException()
+      },
+      newReplaceCause = {
+        queuedRegistered.complete(Unit)
+        check(allowQueuedCancel.await(5, TimeUnit.SECONDS))
+        FLoader.ReplacedCancellationException()
+      },
+      newBusyCause = { FLoader.BusyCancellationException() },
+    )
+
+    // 运行中任务在 Unconfined 上，取消时会在取消方线程内联结束
+    val first = async(Dispatchers.Unconfined) {
+      runCatching { mutator.mutate { awaitCancellation() } }.exceptionOrNull()
+    }
+
+    val queued = async(queuedDispatcher) {
+      runCatching { mutator.mutate { queuedEntered.set(true) } }.exceptionOrNull()
+    }
+    queued.invokeOnCompletion { queuedFinished.countDown() }
+
+    try {
+      queuedRegistered.await()
+      if (join) mutator.cancelAndJoin() else mutator.cancel()
+      // 先取消排队任务再取消运行任务，排队任务才不会趁运行任务内联结束时开始执行
+      assertEquals(false, queuedEntered.get())
+      assertTrue(queued.await() is FLoader.ManualCancellationException)
+      assertTrue(first.await() is FLoader.ReplacedCancellationException)
+      assertEquals(3, mutator.mutateOrThrow { 3 })
+    } finally {
+      allowQueuedCancel.countDown()
+      queuedFinished.countDown()
+      first.cancelAndJoin()
+      queued.cancelAndJoin()
+    }
+  }
+}
+
+@OptIn(ExperimentalCoroutinesApi::class)
+private suspend fun TestScope.checkCancelReadsRegistrationInsideLock(join: Boolean) {
+  Executors.newSingleThreadExecutor().asCoroutineDispatcher().use { cancelDispatcher ->
+    Executors.newSingleThreadExecutor().asCoroutineDispatcher().use { lockDispatcher ->
+      val lockHeld = CompletableDeferred<Unit>()
+      val releaseLock = CountDownLatch(1)
+      val cancelThread = CompletableDeferred<Thread>()
+      val startCancel = CompletableDeferred<Unit>()
+      val cancelCauseCreated = AtomicBoolean()
+      val mutator = FMutator(
+        newCancelCause = {
+          cancelCauseCreated.set(true)
+          FLoader.ManualCancellationException()
+        },
+        newReplaceCause = { FLoader.ReplacedCancellationException() },
+        newBusyCause = {
+          // 忙异常在锁内创建，借它从外部持有锁
+          lockHeld.complete(Unit)
+          check(releaseLock.await(5, TimeUnit.SECONDS))
+          FLoader.BusyCancellationException()
+        },
+      )
+
+      val first = async {
+        runCatching { mutator.mutate { awaitCancellation() } }.exceptionOrNull()
+      }.also { runCurrent() }
+
+      val cancelJob = launch(cancelDispatcher) {
+        cancelThread.complete(Thread.currentThread())
+        startCancel.await()
+        if (join) mutator.cancelAndJoin() else mutator.cancel()
+      }
+
+      try {
+        val thread = cancelThread.await()
+        val busy = async(lockDispatcher) {
+          runCatching { mutator.mutateOrThrow { 2 } }.exceptionOrNull()
+        }
+        lockHeld.await()
+
+        // 持锁期间发起取消，必须在读取登记时被锁挡住，此时还没有发起取消
+        startCancel.complete(Unit)
+        assertEquals(true, awaitBlocked(thread) { cancelCauseCreated.get() })
+        assertEquals(false, cancelCauseCreated.get())
+
+        releaseLock.countDown()
+        assertTrue(busy.await() is FLoader.BusyCancellationException)
+        cancelJob.join()
+        assertTrue(first.await() is FLoader.ManualCancellationException)
+        assertEquals(3, mutator.mutateOrThrow { 3 })
+      } finally {
+        startCancel.complete(Unit)
+        releaseLock.countDown()
+      }
+    }
+  }
+}
+
+// 等目标线程被锁挡住；目标操作越过了锁或超时则返回 false
+private fun awaitBlocked(thread: Thread, passed: () -> Boolean): Boolean {
+  val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5)
+  while (System.nanoTime() < deadline) {
+    if (passed()) return false
+    if (thread.state == Thread.State.BLOCKED) return true
+    Thread.sleep(1)
+  }
+  return false
 }

@@ -68,12 +68,17 @@ class LoaderReferenceTest(private val useTryLoad: Boolean) {
 
   @Test(timeout = 10_000)
   fun `test replaced load releases callback capture`() {
-    checkCancelledLoadReleasesCapture(replace = true)
+    checkCancelledLoadReleasesCapture { load { }.getOrThrow() }
+  }
+
+  @Test(timeout = 10_000)
+  fun `test cancelled by cancel load releases callback capture`() {
+    checkCancelledLoadReleasesCapture { cancel() }
   }
 
   @Test(timeout = 10_000)
   fun `test manually cancelled load releases callback capture`() {
-    checkCancelledLoadReleasesCapture(replace = false)
+    checkCancelledLoadReleasesCapture { cancelAndJoin() }
   }
 
   @Test(timeout = 10_000)
@@ -155,6 +160,14 @@ class LoaderReferenceTest(private val useTryLoad: Boolean) {
   }
 
   @Test(timeout = 10_000)
+  fun `test cancelled by cancel queued load releases callback capture`() {
+    checkCancelledQueuedLoadReleasesCapture { loader, queued ->
+      loader.cancel()
+      queued.join()
+    }
+  }
+
+  @Test(timeout = 10_000)
   fun `test manually cancelled queued load releases callback capture`() {
     checkCancelledQueuedLoadReleasesCapture { loader, queued ->
       val cancelling = launch(start = CoroutineStart.UNDISPATCHED) { loader.cancelAndJoin() }
@@ -189,6 +202,14 @@ class LoaderReferenceTest(private val useTryLoad: Boolean) {
       }
       queued.join()
       assertEquals(false, latest.isCompleted)
+    }
+  }
+
+  @Test(timeout = 10_000)
+  fun `test cancelled by cancel queued load releases callback capture during previous cleanup`() {
+    checkEndedQueuedLoadReleasesCaptureDuringCleanup { loader, queued ->
+      loader.cancel()
+      queued.join()
     }
   }
 
@@ -334,7 +355,7 @@ class LoaderReferenceTest(private val useTryLoad: Boolean) {
   }
 
   // 运行中的加载被别处取消后，Loader 不能继续持有它的回调闭包
-  private fun checkCancelledLoadReleasesCapture(replace: Boolean) {
+  private fun checkCancelledLoadReleasesCapture(cancelLoad: suspend FLoader.() -> Unit) {
     assertReleased(FLoader()) {
       coroutineScope {
         val capture = Any()
@@ -346,7 +367,7 @@ class LoaderReferenceTest(private val useTryLoad: Boolean) {
             }
           }
         }
-        if (replace) load { }.getOrThrow() else cancelAndJoin()
+        cancelLoad()
         first.join()
         capture
       }

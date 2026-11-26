@@ -11,7 +11,7 @@ import kotlinx.coroutines.flow.asStateFlow
 
 /** 串行执行任务，新任务可以取消并等待旧任务，也可以在繁忙时被拒绝 */
 internal class FMutator(
-  /** [cancelAndJoin]取消任务时使用的取消原因 */
+  /** [cancel]或[cancelAndJoin]取消任务时使用的取消原因 */
   private val newCancelCause: () -> CancellationException,
   /** 新任务替换旧任务时使用的取消原因 */
   private val newReplaceCause: () -> CancellationException,
@@ -96,15 +96,15 @@ internal class FMutator(
     }
   }
 
+  /** 取消调用时的最新任务和运行中的任务，不等待它们结束，不包括被顶替的排队任务 */
+  fun cancel() {
+    cancelJobs()
+  }
+
   /** 取消调用时的最新任务和运行中的任务并等待它们结束，不包括被顶替的排队任务 */
   suspend fun cancelAndJoin() {
     _mutateMutex.checkNested()
-
-    val (job, runningJob) = synchronized(_lock) {
-      _job to _runningJob.takeIf { it !== _job }
-    }
-    job?.cancel(newCancelCause())
-    runningJob?.cancel(newCancelCause())
+    val (job, runningJob) = cancelJobs()
 
     // 逐个等待，等 runningJob 时不能再引用 job，否则它结束后仍被持有
     job?.join()
@@ -116,6 +116,15 @@ internal class FMutator(
     return synchronized(_lock) {
       _job?.isCompleted == false || _runningJob?.isCompleted == false
     }
+  }
+
+  private fun cancelJobs(): Pair<Job?, Job?> {
+    val jobs = synchronized(_lock) {
+      _job to _runningJob.takeIf { it !== _job }
+    }
+    jobs.first?.cancel(newCancelCause())
+    jobs.second?.cancel(newCancelCause())
+    return jobs
   }
 
   private fun Job.clearOnCompletion() {
