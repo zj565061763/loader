@@ -10,7 +10,7 @@ implementation("io.github.zj565061763.android:loader:$version")
 // JitPack
 implementation("com.github.zj565061763:loader:$version")
 
-// 本库不会传递协程依赖，使用方必须确保有协程依赖
+// 本库不会传递 Kotlin 协程依赖，接入方必须自行声明协程依赖
 implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
 ```
 
